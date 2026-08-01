@@ -424,6 +424,11 @@ white-space: nowrap;
 color: var(--primary-color);
 font-weight: bold;
 }
+@keyframes stickyUp{from{opacity:0;clip-path:inset(0 0 100% 0)}to{opacity:1;clip-path:inset(0 0 0 0)}}
+#cartSummary:not(.hidden){animation:stickyUp .4s ease-out}
+#featuredProductsList::-webkit-scrollbar {
+    display: none;
+}
 </style>
 
 </head>
@@ -753,7 +758,10 @@ font-weight: bold;
                     <div class="h-[1px] bg-gray-800 flex-1"></div>
                 </div>
 
-                <div id="featuredProductsList" class="grid grid-cols-2 gap-3"></div>
+                <div id="featuredProductsList" class="grid grid-cols-2 gap-3" style="max-height: 75vh; overflow-y: auto; scroll-behavior: smooth; -webkit-overflow-scrolling: touch; scrollbar-width: none;"></div>
+<div id="featuredLoader" class="hidden text-center py-4">
+    <div class="inline-block h-8 w-8 border-2 border-gray-200 border-t-[var(--primary-color)] rounded-full animate-spin"></div>
+</div>
             </section>
 
             <!-- ALL PRODUCTS Section -->
@@ -951,8 +959,8 @@ font-weight: bold;
             </div>
         </div>
     </template>
-
 <template id="cartPageTemplate">
+    <!-- pb-72 দেওয়া হয়েছে কারণ স্টিকি বারের কারণে শেষের রিকমেন্ডেশন প্রোডাক্ট লুকিয়ে যাবে না -->
     <div class="animate-fade-in pb-16">
         <h1 class="text-2xl font-bold mb-6" data-i18n="cart">Shopping Cart</h1>
         <div id="cartPageItems" class="space-y-4"></div>
@@ -962,25 +970,14 @@ font-weight: bold;
             <h3 data-i18n="empty_cart_msg">Your cart is empty</h3>
             <button onclick="navigateTo('#home')" class="cart-btn-start" data-i18n="start_shopping">Start Shopping</button>
         </div>
-        
-        <div id="cartSummary" class="hidden bg-white rounded-xl shadow-sm border p-4 mt-6 space-y-2">
-            <div class="space-y-1 text-sm">
-                <div class="flex justify-between text-gray-600"><span data-i18n="subtotal">Subtotal</span> <span id="pageSubtotal" class="font-medium">৳ 0</span></div>
-                <div class="flex justify-between text-gray-600"><span data-i18n="delivery">Delivery</span> <span id="pageDelivery" class="font-medium">৳ 0</span></div>
-                <div id="pageProdDiscContainer" class="flex justify-between text-green-600 hidden"><span data-i18n="product_discount">Product Discount</span> <span id="pageProdDisc">-৳ 0</span></div>
-                <div id="pageDelDiscContainer" class="flex justify-between text-green-600 hidden"><span data-i18n="delivery_discount">Delivery Discount</span> <span id="pageDelDisc">-৳ 0</span></div>
-                <div id="pagePtsDiscContainer" class="flex justify-between text-purple-600 hidden"><span data-i18n="points_discount">Points Discount</span> <span id="pagePtsDisc">-৳ 0</span></div>
-                <div class="flex justify-between text-lg font-bold border-t pt-2 mt-2"><span data-i18n="total">Total</span> <span id="pageTotal" class="text-primary">৳ 0</span></div>
-            </div>
-            <div class="flex mt-4">
-                <input type="text" id="pageCouponCode" placeholder="Coupon Code" class="flex-1 px-3 py-2 border rounded-l-lg text-sm focus:outline-none focus:ring-1 focus:ring-primary">
-                <button onclick="handleApplyCouponFromPage()" class="bg-gray-800 text-white px-4 py-2 rounded-r-lg text-sm font-medium" data-i18n="apply">Apply</button>
-            </div>
-            <div id="pageCouponMessage" class="text-xs"></div>
-            <button onclick="proceedToCheckout()" class="w-full bg-primary text-white py-3 rounded-lg font-bold mt-2 hover:opacity-90 shadow-lg" data-i18n="checkout">Checkout</button>
+                <!-- GUEST WHATSAPP BUTTON (স্টিকি ডিভ থেকে বের করা হয়েছে) -->
+        <div id="whatsappGuestCheckoutContainer" class="mt-6 hidden">
+            <button onclick="shareCartViaWhatsApp()" class="w-full bg-green-600 text-white py-3.5 rounded-xl font-bold hover:bg-green-700 shadow-lg shadow-green-500/30 flex items-center justify-center gap-2 transition-all active:scale-95 border-2 border-green-500">
+                <i class="fab fa-whatsapp text-2xl"></i> 
+                <span data-i18n="order_via_whatsapp">লগইন ছাড়াই WhatsApp এ অর্ডার করুন</span>
+            </button>
         </div>
-        
-        <!-- COUPONS: আলাদা div, summary এর বাইরে -->
+        <!-- ১. কুপন সেকশন (আগে থেকে এখানে আনা হয়েছে) -->
         <div id="cartCouponsSection" class="hidden mt-6">
             <div class="cart-section-header">
                 <i class="fas fa-ticket-alt"></i>
@@ -993,7 +990,7 @@ font-weight: bold;
             </div>
         </div>
         
-        <!-- RECOMMENDATIONS: আলাদা div, summary এর বাইরে -->
+        <!-- ২. রিকমেন্ডেশন সেকশন (আগে থেকে এখানে আনা হয়েছে) -->
         <div id="cartRecommendationsSection" class="hidden mt-6">
             <div class="cart-section-header">
                 <i class="fas fa-truck-fast"></i>
@@ -1008,6 +1005,24 @@ font-weight: bold;
                 </button>
             </div>
             <div id="cartRecommendationMore" class="hidden space-y-2 mt-3"></div>
+        </div>
+
+        <!-- ৩. চেকআউট সামারি (সবার শেষে এনে স্টিকি করা হয়েছে) -->
+        <div id="cartSummary" class="hidden bg-white p-4 space-y-2 sticky bottom-0 left-0 right-0 z-50 -mx-4 px-4 shadow-[0_-4px_12px_-1px_rgba(0,0,0,0.1)] border-t-2 border-gray-100">
+            <div class="space-y-1 text-sm">
+                <div class="flex justify-between text-gray-600"><span data-i18n="subtotal">Subtotal</span> <span id="pageSubtotal" class="font-medium">৳ 0</span></div>
+                <div class="flex justify-between text-gray-600"><span data-i18n="delivery">Delivery</span> <span id="pageDelivery" class="font-medium">৳ 0</span></div>
+                <div id="pageProdDiscContainer" class="flex justify-between text-green-600 hidden"><span data-i18n="product_discount">Product Discount</span> <span id="pageProdDisc">-৳ 0</span></div>
+                <div id="pageDelDiscContainer" class="flex justify-between text-green-600 hidden"><span data-i18n="delivery_discount">Delivery Discount</span> <span id="pageDelDisc">-৳ 0</span></div>
+                <div id="pagePtsDiscContainer" class="flex justify-between text-purple-600 hidden"><span data-i18n="points_discount">Points Discount</span> <span id="pagePtsDisc">-৳ 0</span></div>
+                <div class="flex justify-between text-lg font-bold border-t pt-2 mt-2"><span data-i18n="total">Total</span> <span id="pageTotal" class="text-primary">৳ 0</span></div>
+            </div>
+            <div class="flex mt-4">
+                <input type="text" id="pageCouponCode" placeholder="Coupon Code" class="flex-1 px-3 py-2 border rounded-l-lg text-sm focus:outline-none focus:ring-1 focus:ring-primary">
+                <button onclick="handleApplyCouponFromPage()" class="bg-gray-800 text-white px-4 py-2 rounded-r-lg text-sm font-medium" data-i18n="apply">Apply</button>
+            </div>
+            <div id="pageCouponMessage" class="text-xs"></div>
+            <button onclick="proceedToCheckout()" class="w-full bg-primary text-white py-3 rounded-lg font-bold mt-2 hover:opacity-90 shadow-lg" data-i18n="checkout">Checkout</button>
         </div>
     </div>
 </template>
@@ -1339,7 +1354,7 @@ font-weight: bold;
     // VERCEL/NETLIFY HOSTING HELPER (POLYFILL FOR GOOGLE.SCRIPT.RUN)
     // ============================================================
     // নিচে আপনার Google Apps Script-এর বর্তমান Web App URL-টি বসিয়ে দিন:
-    const GAS_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbx_Ee51rZKqct_PjzNMtDB25BT43YrhaEfMh2Jqt7njSDcz4xPUDbMrxztGpdU9s1lYKQ/exec"; 
+    const GAS_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbwe2Th32VyzxQzpNiyucPwL1BuJ-AQp5x6MjUWzQRQUShhKNIuR30HEYNHiF0Au82Lz/exec"; 
 
 // ✅ সঠিক পলিফিল (Proxy Chain ভাঙে না, Handler আলাদা থাকে)
 if (typeof google === 'undefined' || !google.script) {
@@ -1517,7 +1532,12 @@ function escapeHTML(str) {
         // ============================================================
         const I18N = {
             en: {
-                home: "Home", categories: "Categories", message: "Message", cart: "Cart", account: "Account",
+                            order_via_whatsapp: "Order Via WhatsApp Without Login",
+                            cod_100: "100% Cash on Delivery",
+                bd_fastest: "Fastest Delivery All Over Bangladesh",
+                fast_support: "Fastest Support",
+                genuine_100: "100% Genuine Products",
+                home: "Home", categories: "All Categories", message: "Message", cart: "Cart", account: "Account",
                 search_ph: "Search products...",
                 top_cat: "TOP CATEGORIES", featured: "FEATURED", all_prod: "ALL PRODUCTS", view_all: "View All",
                 related: "Related Products",
@@ -1654,7 +1674,12 @@ function escapeHTML(str) {
                 available_coupons: "Available Coupons"
             },
             bn: {
-                home: "হোম", categories: "ক্যাটাগরি", message: "মেসেজ", cart: "কার্ট", account: "অ্যাকাউন্ট",
+                            order_via_whatsapp: "লগইন ছাড়াই WhatsApp এ অর্ডার করুন",
+                            cod_100: "১০০% ক্যাশ অন ডেলিভারি",
+                bd_fastest: "সারাদেশে দ্রুততম ডেলিভারি",
+                fast_support: "দ্রুততম সাপোর্ট",
+                genuine_100: "১০০% নির্ভরযোগ্য প্রোডাক্ট",
+                home: "হোম", categories: "সকল ক্যাটাগরি", message: "মেসেজ", cart: "কার্ট", account: "অ্যাকাউন্ট",
                 search_ph: "পণ্য খুঁজুন...",
                 top_cat: "শীর্ষ ক্যাটাগরি", featured: "জনপ্রিয় পণ্য", all_prod: "সকল পণ্য", view_all: "সব দেখুন",
                 related: "সম্পর্কিত পণ্য",
@@ -3255,31 +3280,20 @@ function shuffleArray(array) {
 
 // ১. সম্পূর্ণ প্রোডাক্ট লিস্টকে পেজ ভিত্তিক বিন্যাস (Layout) করার মেইন ফাংশন
 function generateAllPagesLayout() {
-    const allProducts = appData.products || [];
+    // ==========================================
+    // ফিক্স: ফিচার্ড সেকশনে দেখানো প্রোডাক্টগুলো এখান থেকে বাদ দেওয়া
+    // ==========================================
+    let allProducts = appData.products || [];
+    if (appData.featuredBannerProductIds && appData.featuredBannerProductIds.size > 0) {
+        allProducts = allProducts.filter(p => !appData.featuredBannerProductIds.has(String(p.id)));
+    }
     if (allProducts.length === 0) return;
 
-    // ১ থেকে ৬ নম্বর প্রোডাক্ট ফিচার্ড (আলাদা থাকবে)
-    const featuredProds = allProducts.slice(0, 6);
-    // ৭ ও ৮ নম্বর প্রোডাক্ট অল প্রোডাক্ট সেকশনের শুরুতে ফিক্সড থাকবে
-    const fixedProds = allProducts.slice(6, 8);
-    // ৯ নম্বর থেকে বাকি সব প্রোডাক্ট ডাইনামিক পুলে যাবে
-    const dynamicPool = allProducts.slice(8);
-
-    // অ্যাক্টিভ ব্যানার ক্যাটাগরিগুলো ফিল্টার করা (শিটের ক্রমানুসারে থাকবে)
-    const bannerCats = (appData.categories || []).filter(c => 
-        c.inlinebanner && 
-        c.inlinebanner.trim() !== '' && 
-        (c.inlinebanner.startsWith('http://') || c.inlinebanner.startsWith('https://'))
-    );
-
-    // ব্যানারগুলোকে ইউনিক অবজেক্ট হিসেবে অ্যারেতে রাখা (এখানে কোনো shuffle হবে না, শিটের সিরিয়াল ঠিক থাকবে)
-    let activeBanners = bannerCats.map(cat => {
-        return {
-            category: cat.categoryname, 
-            bannerUrl: cat.inlinebanner,
-            products: []
-        };
-    });
+    // অল প্রোডাক্ট সেকশনের শুরুতে ২টি প্রোডাক্ট ফিক্সড থাকবে (পেজ ১-এ)
+    const fixedProds = allProducts.slice(0, 2);
+    // বাকি সব প্রোডাক্ট ডাইনামিক পুলে যাবে
+    const dynamicPool = allProducts.slice(2);
+    let activeBanners = []; 
 
     // প্রোডাক্টগুলোকে তাদের সঠিক ব্যানারে ভাগ করা
     const normalPool = [];
@@ -3501,14 +3515,38 @@ function renderPaginationControls(currentPage, totalProducts) {
     const totalPages = 1 + extraPages;
     if (totalPages <= 1) { container.innerHTML = ''; return; }
 
+    container.className = 'mt-6 flex flex-col items-center';
+
+    const PER_ROW = 10;
+    const totalRows = Math.ceil(totalPages / PER_ROW);
     let html = '';
-    html += `<button onclick="loadAllProductsSection(${currentPage - 1})" ${currentPage === 1 ? 'disabled' : ''} class="px-3 py-1 border rounded font-medium transition-colors ${currentPage === 1 ? 'text-gray-300 cursor-not-allowed border-gray-200' : 'hover:bg-gray-50 text-gray-700'}"><i class="fas fa-chevron-left"></i></button>`;
-    for (let i = 1; i <= totalPages; i++) {
-        html += i === currentPage 
-            ? `<button class="w-8 h-8 flex items-center justify-center rounded font-bold text-white bg-primary shadow-md">${i}</button>` 
-            : `<button onclick="loadAllProductsSection(${i})" class="w-8 h-8 flex items-center justify-center rounded font-medium text-gray-700 border hover:bg-gray-50 transition-colors">${i}</button>`;
+
+    for (let row = 0; row < totalRows; row++) {
+        const start = row * PER_ROW + 1;
+        const end = Math.min(start + PER_ROW - 1, totalPages);
+        const isLastRow = row === totalRows - 1;
+
+        html += `<div class="inline-flex justify-center items-center gap-1 ${row > 0 ? 'mt-2' : ''}">`;
+
+        if (isLastRow) {
+            html += `<button onclick="loadAllProductsSection(${currentPage - 1})" ${currentPage === 1 ? 'disabled' : ''} class="w-6 h-6 rounded font-medium text-[10px] flex items-center justify-center border transition-colors ${currentPage === 1 ? 'text-gray-300 cursor-not-allowed border-gray-200' : 'hover:bg-gray-50 text-gray-700'}"><i class="fas fa-chevron-left text-[8px]"></i></button>`;
+        }
+
+        for (let i = start; i <= end; i++) {
+            if (i === currentPage) {
+                html += `<button class="w-6 h-6 rounded font-bold text-[11px] flex items-center justify-center bg-primary text-white shadow-md">${i}</button>`;
+            } else {
+                html += `<button onclick="loadAllProductsSection(${i})" class="w-6 h-6 rounded font-medium text-[10px] flex items-center justify-center border text-gray-700 hover:bg-gray-50 transition-colors">${i}</button>`;
+            }
+        }
+
+        if (isLastRow) {
+            html += `<button onclick="loadAllProductsSection(${currentPage + 1})" ${currentPage === totalPages ? 'disabled' : ''} class="w-6 h-6 rounded font-medium text-[10px] flex items-center justify-center border transition-colors ${currentPage === totalPages ? 'text-gray-300 cursor-not-allowed border-gray-200' : 'hover:bg-gray-50 text-gray-700'}"><i class="fas fa-chevron-right text-[8px]"></i></button>`;
+        }
+
+        html += `</div>`;
     }
-    html += `<button onclick="loadAllProductsSection(${currentPage + 1})" ${currentPage === totalPages ? 'disabled' : ''} class="px-3 py-1 border rounded font-medium transition-colors ${currentPage === totalPages ? 'text-gray-300 cursor-not-allowed border-gray-200' : 'hover:bg-gray-50 text-gray-700'}"><i class="fas fa-chevron-right"></i></button>`;
+
     container.innerHTML = html;
 }
 window.addEventListener('scroll', () => {
@@ -4141,7 +4179,7 @@ function updateCartPageUI() {
     }
     
     emptyState.classList.add('hidden');
-    summary.classList.remove('hidden');
+    summary.style.animation='none',summary.offsetHeight,summary.style.animation='',summary.classList.remove('hidden');
 
     // কার্ট আইটেম রেন্ডার করা
     container.innerHTML = appData.cart.map((item, idx) => {
@@ -4575,6 +4613,17 @@ function updateQty(idx, delta) {
     
     // ৪. অর্ডার সামারি আপডেট করা (এখানে লোকাল স্টোরেজে সেভ হয়)
     updateOrderSummary();
+        // ==========================================
+    // NEW: পেজ UI আপডেটের পর WhatsApp বাটন স্টেটাস চেক
+    // ==========================================
+    const waBtn = document.getElementById('whatsappGuestCheckoutContainer');
+    if(waBtn) {
+        if (!appData.user) {
+            waBtn.classList.remove('hidden');
+        } else {
+            waBtn.classList.add('hidden');
+        }
+    }
     // ==========================================
 }
 
@@ -4814,13 +4863,40 @@ function loadHeroSlider() {
             container.innerHTML = html;
         }
 
-        function loadFeaturedProducts() {
-            const container = document.getElementById('featuredProductsList');
-            if (!container) return;
-            // Use totalstock (sum of variants) to check availability
-            const prods = appData.products.filter(p => p.totalstock > 0).slice(0, 6);
-            container.innerHTML = prods.map(p => createProductCard(p)).join('');
-        }
+function loadFeaturedProducts() {
+    const container = document.getElementById('featuredProductsList');
+    if (!container) return;
+    
+    // পেজ লোড হলে আগের ব্যবহৃত ডাটা রিসেট করা হচ্ছে
+    appData.featuredBannerProductIds = new Set();
+    appData.featuredBannerIndex = 0;
+    
+    // শীট থেকে সব ব্যানার একবার ক্যাশে করে রাখা হচ্ছে
+    appData.activeBannersCache = appData.categories.filter(c => 
+        c.inlinebanner && 
+        c.inlinebanner.trim() !== '' && 
+        (c.inlinebanner.startsWith('http://') || c.inlinebanner.startsWith('https://'))
+    );
+
+    let html = '';
+
+    // ১. প্রথম ৬টি ফিক্সড প্রোডাক্ট রেন্ডার করুন
+    const fixedFeaturedProds = appData.products.slice(0, 6); 
+    fixedFeaturedProds.forEach(p => {
+        appData.featuredBannerProductIds.add(String(p.id)); 
+        html += createProductCard(p);
+    });
+
+    // ২. যদি ব্যানার থাকে, প্রথম ব্যানার লোড করুন
+    if (appData.activeBannersCache && appData.activeBannersCache.length > 0) {
+        loadNextFeaturedBanner();
+    }
+
+    container.innerHTML = html;
+    
+    // ৩. স্ক্রল অবজারভার সেটআপ করুন
+    setupFeaturedObserver();
+}
 
         // ================= UPDATED: Product Card Generator =================
         function createProductCard(p) {
@@ -5247,9 +5323,16 @@ function loadCartPage() {
         updateCartPageUI();
     }
     
-    // ==========================================
-    // কুপন ও রিকমেন্ডেশন: সবসময় দেখাবে (কার্ট খালি থাকলেও)
-    // ==========================================
+    // নতুন: লগইন না থাকলে WhatsApp বাটন দেখাবে
+    const waBtn = document.getElementById('whatsappGuestCheckoutContainer');
+    if(waBtn) {
+        if (!appData.user) {
+            waBtn.classList.remove('hidden');
+        } else {
+            waBtn.classList.add('hidden');
+        }
+    }
+    
     renderCartCoupons();
     renderCartRecommendations();
 }
@@ -5611,7 +5694,7 @@ function createRecCard(product, prefix) {
     const isSelected = appData.cart.some(item => item.id == product.id && item.selected !== false);
     
     return `
-        <div class="rec-new-card">
+        <div class="rec-new-card" onclick="navigateTo('#product?id=${product.id}')" style="cursor: pointer;">
             <img src="${product.imagemain}" class="rec-new-img" loading="lazy" alt="${product.name}" onerror="this.src='https://via.placeholder.com/54?text=Img'">
             <div class="rec-new-info">
                 <div class="rec-new-name">${product.name}</div>
@@ -5626,7 +5709,7 @@ function createRecCard(product, prefix) {
                 ${isSelected ? `
                     <span class="rec-new-btn added"><i class="fas fa-check" style="margin-right:4px"></i>${tL('already_added')}</span>
                 ` : `
-                    <button onclick="addRecToCart('${product.id}')" class="rec-new-btn">${tL('add_item')}</button>
+                    <button onclick="event.stopPropagation(); addRecToCart('${product.id}')" class="rec-new-btn">${tL('add_item')}</button>
                 `}
             </div>
         </div>
@@ -6787,6 +6870,25 @@ function searchProducts(query) {
                     
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-8 mb-8 border-t border-gray-800 pt-8 text-center md:text-left">
                         <div>
+                                                            <!-- TRUST BADGES / FEATURE ICONS -->
+                    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+                        <div class="flex flex-col items-center justify-center bg-gray-900/50 rounded-xl py-4 px-2 border border-gray-800">
+                            <i class="fas fa-money-bill-wave text-2xl text-green-400 mb-2"></i>
+                            <span class="text-[11px] font-bold text-gray-300 text-center leading-tight">${t('cod_100')}</span>
+                        </div>
+                        <div class="flex flex-col items-center justify-center bg-gray-900/50 rounded-xl py-4 px-2 border border-gray-800">
+                            <i class="fas fa-truck-fast text-2xl text-blue-400 mb-2"></i>
+                            <span class="text-[11px] font-bold text-gray-300 text-center leading-tight">${t('bd_fastest')}</span>
+                        </div>
+                        <div class="flex flex-col items-center justify-center bg-gray-900/50 rounded-xl py-4 px-2 border border-gray-800">
+                            <i class="fas fa-headset text-2xl text-yellow-400 mb-2"></i>
+                            <span class="text-[11px] font-bold text-gray-300 text-center leading-tight">${t('fast_support')}</span>
+                        </div>
+                        <div class="flex flex-col items-center justify-center bg-gray-900/50 rounded-xl py-4 px-2 border border-gray-800">
+                            <i class="fas fa-shield-halved text-2xl text-purple-400 mb-2"></i>
+                            <span class="text-[11px] font-bold text-gray-300 text-center leading-tight">${t('genuine_100')}</span>
+                        </div>
+                    </div>
                             <h3 class="font-bold text-lg mb-4 text-white underline">Links</h3>
                             <ul class="space-y-2">
                                 ${policyLinks}
@@ -6806,7 +6908,7 @@ function searchProducts(query) {
                     
                     <div class="border-t border-gray-800 pt-6 text-center text-sm text-white font-bold">
                         &copy; ${year} ${s.sitename}. All rights reserved.
-                        <br>Developed by safaboxbd team
+                        <br>Developed by safabox team
                     </div>
                 </div>
             </footer>`;
@@ -7519,6 +7621,173 @@ async function trackCAPI(eventName, customData, eventId) {
     } catch (err) {
         console.error("CAPI Fetch Error:", err);
     }
+}
+function shareCartViaWhatsApp() {
+    const items = appData.cart.filter(i => i.selected !== false);
+    if (!items.length) return Swal.fire('Warning', t('fill_all'), 'warning');
+    
+    const s = appData.settings;
+    const siteName = s.sitename || 'SafaBoxbd';
+    const pageLink = window.location.href;
+    const fmt = (n) => '৳' + Math.round(n).toLocaleString('en-IN');
+
+    // ১. পণ্যের তালিকা তৈরি
+    let itemLines = '';
+    items.forEach((p, i) => {
+        const q = p.quantity || p.qty || 1;
+        const pr = parseFloat(p.price) || 0;
+        const variantText = p.selectedVariant ? ` (${p.selectedVariant})` : '';
+        itemLines += `${i+1}. ${p.name}${variantText}\n   └─ পরিমাণ: ${q}\n   └─ মূল্য: ${fmt(pr)}\n`;
+    });
+
+    // ২. সাবটোটাল হিসাব
+    const subTotal = items.reduce((sum, i) => sum + ((parseFloat(i.price)) * (i.quantity || i.qty)), 0);
+
+    // ৩. ডেলিভারি চার্জ হিসাব (গেস্ট ইউজার = কুপন নেই)
+    const baseDelivery = parseFloat(s.deliverycharge) || 0;
+    let deliveryTotal = 0;
+    if (items.length > 0) {
+        deliveryTotal = baseDelivery;
+        // প্রথম আইটেমের অতিরিক্ত কোয়ান্টিটির চার্জ
+        const firstQty = items[0].quantity || items[0].qty || 1;
+        if (firstQty > 1) {
+            deliveryTotal += ((firstQty - 1) * (parseFloat(items[0].extradeliverycharge || 0)));
+        }
+        // বাকি আইটেমগুলোর চার্জ
+        for (let i = 1; i < items.length; i++) {
+            const qty = items[i].quantity || items[i].qty || 1;
+            deliveryTotal += (qty * (parseFloat(items[i].extradeliverycharge || 0)));
+        }
+    }
+    const finalTotal = subTotal + deliveryTotal;
+
+    // ৪. ফাইনাল মেসেজ তৈরি
+    let msg = `━━━━━━━━━━━━━━━━━━━━━━━\n📌 *সম্মানিত গ্রাহক, আপনার অর্ডারটি নিশ্চিত করার জন্য অনুগ্রহ করে নিচের তথ্যগুলো পূরণ করুন এবং বাকি অংশ অপরিবর্তিত রেখে মেসেজটি পাঠান।*\n━━━━━━━━━━━━━━━━━━━━━━━\n`;
+    msg += `👤 নাম:\n📱 মোবাইল:\n📍 জেলা:\n🏠 উপজেলা:\n🏡 সম্পূর্ণ ঠিকানা:\n`;
+    msg += `━━━━━━━━━━━━━━━━━━━━━━━\n📦 *অর্ডারের পণ্যসমূহ*\n━━━━━━━━━━━━━━━━━━━━━━━\n`;
+    msg += itemLines;
+    msg += `━━━━━━━━━━━━━━━━━━━━━━━\n💰 *অর্ডার সারসংক্ষেপ*\n━━━━━━━━━━━━━━━━━━━━━━━\n`;
+    msg += `সাবটোটাল : ${fmt(subTotal)}\n`;
+    msg += `ডেলিভারি : ${fmt(deliveryTotal)}\n`;
+    msg += `━━━━━━━━━━━━━━━━━━━━━━━\n`;
+    msg += `🟢 *মোট পরিশোধযোগ্য : ${fmt(finalTotal)}*\n`;
+    msg += `━━━━━━━━━━━━━━━━━━━━━━━\n`;
+    msg += `📝 *অতিরিক্ত নির্দেশনা লিখুন (যদি থাকে):*\n`;
+    msg += `━━━━━━━━━━━━━━━━━━━━━━━\n`;
+    msg += `🚚 *অর্ডার নিশ্চিত হওয়ার পর নির্ধারিত সময়ের মধ্যে আপনার ঠিকানায় পৌঁছে দেওয়া হবে।*\n`;
+    msg += `📞 *প্রয়োজনে আমাদের প্রতিনিধি আপনার সাথে যোগাযোগ করবেন।*\n`;
+    msg += `🤝 *${siteName}-এর প্রতি আপনার আস্থা ও বিশ্বাসের জন্য আন্তরিক ধন্যবাদ। আমরা আপনাকে সর্বোত্তম সেবা দিতে প্রতিশ্রুতিবদ্ধ।*\n`;
+    msg += `${pageLink}`;
+
+    // ৫. WhatsApp ওপেন করা
+    const n = (s.whatsappnumber || '').replace(/\D/g, '');
+    if (n) {
+        window.open(`https://wa.me/${n}?text=${encodeURIComponent(msg)}`, '_blank');
+    } else {
+        Swal.fire('Info', 'WhatsApp number is not configured.', 'info');
+    }
+}
+// ==========================================
+// LAZY LOADING: FEATURED BANNER OBSERVER
+// ==========================================
+appData.activeBannersCache = []; 
+appData.featuredBannerIndex = 0;
+
+function loadNextFeaturedBanner() {
+    const activeBanners = appData.activeBannersCache;
+    
+    // যদি ব্যানার শেষ হয়ে গেছে, আর লোড করবে না
+    if (!activeBanners || appData.featuredBannerIndex >= activeBanners.length) {
+        const loader = document.getElementById('featuredLoader');
+        if(loader) loader.classList.add('hidden');
+        
+        // সব ব্যানার শেষ হলে "All Products" দেখানোর একটি বাটন তৈরি হবে
+        const container = document.getElementById('featuredProductsList');
+        if(container && !document.getElementById('viewAllProductsBtn')) {
+            container.insertAdjacentHTML('beforeend', `
+                <div id="viewAllProductsBtn" class="col-span-2 py-3 text-center">
+                    <button onclick="document.getElementById('allProductsSection').scrollIntoView({behavior: 'smooth'})" 
+                            class="text-sm font-bold text-gray-500 border border-gray-200 px-4 py-2 rounded-full hover:bg-gray-50 transition">
+                        সকল প্রোডাক্যান্ট দেখুন ↓
+                    </button>
+                </div>
+            `);
+        }
+        return; 
+    }
+
+    const banner = activeBanners[appData.featuredBannerIndex];
+    appData.featuredBannerIndex++;
+
+    // ঐ ব্যানারের প্রোডাক্ট খুঁজুন (আগের দেখানো হয়েছে এমন প্রোডাক্ট বাদ দিয়ে)
+    const matchingProducts = appData.products.filter(p => 
+        (p.category === banner.categoryname || p.category.startsWith(banner.categoryname + ' > ')) && 
+        p.totalstock > 0 &&
+        !appData.featuredBannerProductIds.has(String(p.id))
+    );
+
+    // যদি ওই ক্যাটাগরিতে কোনো প্রোডাক্ট না থাকলে, পরের ব্যানারে চেষে যাওয়া চেষ করুন
+    if (matchingProducts.length === 0) {
+        loadNextFeaturedBanner(); 
+        return;
+    }
+
+    shuffleArray(matchingProducts);
+    const displayProducts = matchingProducts.slice(0, 4);
+    displayProducts.forEach(p => appData.featuredBannerProductIds.add(String(p.id)));
+
+    const container = document.getElementById('featuredProductsList');
+    
+    // ব্যানার ইমেজ/ভিডিও চেক করা
+    const isVideo = banner.inlinebanner.match(/\.(mp4|webm|ogg)($|\?)/i);
+    let mediaTag = '';
+    if (isVideo) {
+        mediaTag = `<video src="${banner.inlinebanner}" class="w-full h-auto object-cover" autoplay loop muted playsinline></video>`;
+    } else {
+        mediaTag = `ضعimg src="${banner.inlinebanner}" class="w-full h-auto object-cover" loading="lazy" onerror="this.parentElement.parentElement.style.display='none';" alt="${banner.categoryname}">`;
+    }
+
+    // ব্যানার এবং প্রোডাক্যান্ট যোগ করা
+    container.insertAdjacentHTML('beforeend', `
+        <div class="col-span-2 w-full my-2">
+            <div class="w-full rounded-xl overflow-hidden border border-gray-100 bg-gray-50 shadow-sm cursor-pointer hover:shadow-md transition-shadow" 
+                 onclick="event.stopPropagation(); navigateTo('#category?name=${encodeURIComponent(banner.categoryname)}')">
+                ${mediaTag}
+            </div>
+        </div>
+    `);
+
+    displayProducts.forEach(p => {
+        container.insertAdjacentHTML('beforeend', createProductCard(p));
+    });
+
+    if (displayProducts.length % 2 !== 0) {
+        container.insertAdjacentHTML('beforeend', `<div class="w-full h-full pointer-events-none hidden md:block"></div>`);
+    }
+
+    // স্পিনার দেখাবে থাকলে কিনা চেক করা হচ্ছে
+    const loader = document.getElementById('featuredLoader');
+    if(loader) {
+        if (appData.featuredBannerIndex < appData.activeBannersCache.length) {
+            loader.classList.remove('hidden');
+        } else {
+            loader.classList.add('hidden');
+        }
+    }
+}
+
+// Observer সেটআপ করার ফাংশন
+function setupFeaturedObserver() {
+    const loader = document.getElementById('featuredLoader');
+    if (!loader) return;
+
+    const observer = new IntersectionObserver((entries) => {
+        if (entries[0].isIntersecting) {
+            loadNextFeaturedBanner();
+        }
+    }, { rootMargin: '200px' }); 
+
+    observer.observe(loader);
 }
     </script>
 </body>
