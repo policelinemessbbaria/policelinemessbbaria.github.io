@@ -1,0 +1,543 @@
+<!DOCTYPE html>
+<html lang="bn">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SafaBoxBD - Admin Panel</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+    <script>
+        // ==========================================
+        // আপনার ব্যাকএন্ড URL এখানে বসান
+        // ==========================================
+        const GAS_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbxJLVMRgwA9zCRR2tgjH2Q1xcPDrIeVjq6auA0A3jHoRQDwro6nQMnolyYJuQCA1Rlrng/exec";
+
+        // ==========================================
+        // POLYFILL (Proxy Architecture)
+        // ==========================================
+        if (typeof google === 'undefined' || !google.script) {
+            window.google = {
+                script: {
+                    run: (() => {
+                        function createChain(successCb, failureCb) {
+                            const mySuccess = successCb || ((res) => console.log("Success:", res));
+                            const myFailure = failureCb || ((err) => console.error("Failure:", err));
+                            
+                            const chainMethods = {
+                                withSuccessHandler: function(callback) { return createChain(callback, myFailure); },
+                                withFailureHandler: function(callback) { return createChain(mySuccess, callback); }
+                            };
+                            return new Proxy(chainMethods, {
+                                get: function(target, prop) {
+                                    if (prop in target) return target[prop];
+                                    return function(...args) {
+                                        const capturedSuccess = mySuccess;
+                                        const capturedFailure = myFailure;
+                                        fetch(GAS_WEB_APP_URL, {
+                                            method: 'POST', mode: 'cors',
+                                            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                                            body: JSON.stringify({ functionName: prop, arguments: args })
+                                        })
+                                        .then(response => {
+                                            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                                            return response.json();
+                                        })
+                                        .then(res => capturedSuccess(res))
+                                        .catch(err => capturedFailure(err.message || err));
+                                    };
+                                }
+                            });
+                        }
+                        return createChain();
+                    })()
+                }
+            };
+        }
+    </script>
+    <style>
+        .nav-item.active { background-color: #e5e7eb; color: #111827; border-right: 4px solid #2563eb; }
+        .spinner { border: 3px solid rgba(255,255,255,0.3); border-radius: 50%; border-top-color: #fff; animation: spin 1s ease-in-out infinite; width: 20px; height: 20px; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-800 font-sans antialiased overflow-hidden h-screen flex">
+
+    <div id="loginScreen" class="fixed inset-0 bg-gray-900 z-50 flex items-center justify-center">
+        <div class="bg-white p-8 rounded-xl shadow-2xl w-96 max-w-[90%]">
+            <h2 class="text-2xl font-bold text-center mb-6 text-gray-800">Admin Login</h2>
+            <div class="mb-4">
+                <label class="block text-sm font-bold text-gray-600 mb-1">Secret Key</label>
+                <input type="password" id="adminSecretInput" class="w-full border rounded-lg p-3 outline-none focus:ring-2 focus:ring-blue-500" placeholder="Enter admin secret key">
+            </div>
+            <button onclick="loginAdmin()" class="w-full bg-blue-600 text-white font-bold py-3 rounded-lg hover:bg-blue-700 transition flex justify-center items-center gap-2">
+                <span id="loginBtnText">Login & Fetch Data</span>
+                <div id="loginSpinner" class="spinner hidden"></div>
+            </button>
+            <p class="text-xs text-gray-400 mt-4 text-center">Fetching all data at once to save quota.</p>
+        </div>
+    </div>
+
+    <div id="adminPanel" class="hidden w-full h-full flex">
+        
+        <aside class="w-64 bg-white border-r border-gray-200 h-full flex flex-col shadow-sm shrink-0">
+            <div class="p-6 border-b border-gray-100">
+                <h1 class="text-xl font-extrabold text-blue-600">SafaBoxBD</h1>
+                <p class="text-xs text-gray-400">Admin Workspace</p>
+            </div>
+            <nav class="flex-1 overflow-y-auto py-4">
+                <button onclick="switchTab('dashboard')" id="nav-dashboard" class="nav-item active w-full flex items-center px-6 py-3 text-gray-600 hover:bg-gray-50 transition text-sm font-bold">
+                    <i class="fas fa-chart-pie w-6"></i> Dashboard
+                </button>
+                <button onclick="switchTab('orders')" id="nav-orders" class="nav-item w-full flex items-center px-6 py-3 text-gray-600 hover:bg-gray-50 transition text-sm font-bold">
+                    <i class="fas fa-shopping-bag w-6"></i> Orders
+                </button>
+                <button onclick="switchTab('products')" id="nav-products" class="nav-item w-full flex items-center px-6 py-3 text-gray-600 hover:bg-gray-50 transition text-sm font-bold">
+                    <i class="fas fa-box w-6"></i> Products
+                </button>
+            </nav>
+            <div class="p-4 border-t border-gray-100">
+                <button onclick="logoutAdmin()" class="w-full flex items-center justify-center gap-2 bg-red-50 text-red-600 px-4 py-2 rounded-lg font-bold hover:bg-red-100 transition">
+                    <i class="fas fa-sign-out-alt"></i> Logout
+                </button>
+            </div>
+        </aside>
+
+        <main class="flex-1 flex flex-col h-full overflow-hidden bg-gray-50">
+            <header class="bg-white border-b border-gray-200 h-16 flex items-center justify-between px-8 shrink-0">
+                <h2 id="pageTitle" class="text-lg font-bold text-gray-800">Dashboard</h2>
+                <div class="flex items-center gap-4">
+                    <span class="text-sm font-bold text-green-600 bg-green-50 px-3 py-1 rounded-full"><i class="fas fa-wifi"></i> Live Sync Ready</span>
+                    <button onclick="fetchData()" class="text-gray-500 hover:text-blue-600 transition" title="Refresh Data"><i class="fas fa-sync-alt"></i></button>
+                </div>
+            </header>
+
+            <div id="contentArea" class="flex-1 overflow-y-auto p-8">
+                </div>
+        </main>
+    </div>
+
+    <div id="productModal" class="fixed inset-0 bg-gray-900/50 z-[60] hidden items-center justify-center">
+        <div class="bg-white rounded-xl shadow-2xl w-[800px] max-w-[95%] max-h-[90vh] flex flex-col">
+            <div class="px-6 py-4 border-b border-gray-100 flex justify-between items-center shrink-0">
+                <h3 id="productModalTitle" class="text-lg font-bold">Add / Edit Product</h3>
+                <button onclick="closeProductModal()" class="text-gray-400 hover:text-red-500"><i class="fas fa-times text-xl"></i></button>
+            </div>
+            <div class="p-6 overflow-y-auto flex-1">
+                <form id="productForm" class="grid grid-cols-2 gap-4 text-sm">
+                    <div class="col-span-2 md:col-span-1">
+                        <label class="font-bold block mb-1">Product ID (Unique)*</label>
+                        <input type="text" id="p_id" class="w-full border rounded p-2" required>
+                    </div>
+                    <div class="col-span-2 md:col-span-1">
+                        <label class="font-bold block mb-1">Name*</label>
+                        <input type="text" id="p_name" class="w-full border rounded p-2" required>
+                    </div>
+                    <div class="col-span-2 md:col-span-1">
+                        <label class="font-bold block mb-1">Category*</label>
+                        <input type="text" id="p_category" class="w-full border rounded p-2" placeholder="e.g., Electronics > Mobile">
+                    </div>
+                    <div class="col-span-2 md:col-span-1">
+                        <label class="font-bold block mb-1">Price (Regular)*</label>
+                        <input type="number" id="p_price" class="w-full border rounded p-2" required>
+                    </div>
+                    <div class="col-span-2 md:col-span-1">
+                        <label class="font-bold block mb-1">Discount Price</label>
+                        <input type="number" id="p_discount" class="w-full border rounded p-2">
+                    </div>
+                    <div class="col-span-2 md:col-span-1">
+                        <label class="font-bold block mb-1">Total Stock*</label>
+                        <input type="number" id="p_stock" class="w-full border rounded p-2" required>
+                    </div>
+                    <div class="col-span-2">
+                        <label class="font-bold block mb-1">Main Image URL*</label>
+                        <input type="url" id="p_image" class="w-full border rounded p-2" required>
+                    </div>
+                    <div class="col-span-2">
+                        <label class="font-bold block mb-1">Variants (Format: Name:Price:Stock:ExtraCharge)</label>
+                        <input type="text" id="p_variants" class="w-full border rounded p-2" placeholder="e.g., Red:500:10:0, Blue:500:5:0">
+                        <p class="text-[10px] text-gray-500 mt-1">Leave empty if no variants. Separate multiple with commas.</p>
+                    </div>
+                    <div class="col-span-2">
+                        <label class="font-bold block mb-1">Description (HTML allowed)</label>
+                        <textarea id="p_desc" rows="3" class="w-full border rounded p-2"></textarea>
+                    </div>
+                </form>
+            </div>
+            <div class="px-6 py-4 border-t border-gray-100 shrink-0 flex justify-end gap-3 bg-gray-50">
+                <button onclick="closeProductModal()" class="px-5 py-2 font-bold text-gray-600 hover:bg-gray-200 rounded-lg">Cancel</button>
+                <button onclick="saveProduct()" class="px-5 py-2 font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-md">Save to Server</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ==========================================
+        // STATE MANAGEMENT
+        // ==========================================
+        let adminSecret = sessionStorage.getItem('adminSecret') || '';
+        let localData = {
+            products: [],
+            orders: [],
+            settings: {},
+            categories: []
+        };
+
+        // ==========================================
+        // INITIALIZATION
+        // ==========================================
+        window.onload = () => {
+            if (adminSecret) {
+                document.getElementById('adminSecretInput').value = adminSecret;
+                loginAdmin();
+            }
+        };
+
+        function loginAdmin() {
+            const secret = document.getElementById('adminSecretInput').value.trim();
+            if(!secret) return Swal.fire('Error', 'Enter secret key', 'error');
+
+            document.getElementById('loginBtnText').innerText = "Connecting...";
+            document.getElementById('loginSpinner').classList.remove('hidden');
+
+            // Fetching ALL data at once to reduce Quota
+            google.script.run
+                .withSuccessHandler(res => {
+                    document.getElementById('loginBtnText').innerText = "Login & Fetch Data";
+                    document.getElementById('loginSpinner').classList.add('hidden');
+
+                    if(res.success) {
+                        adminSecret = secret;
+                        sessionStorage.setItem('adminSecret', secret);
+                        
+                        // Save to Local Memory
+                        localData.settings = res.data.settings || {};
+                        localData.products = res.data.products || [];
+                        localData.orders = res.data.orders || [];
+                        localData.categories = res.data.categories || [];
+
+                        // Show Panel
+                        document.getElementById('loginScreen').classList.add('hidden');
+                        document.getElementById('adminPanel').classList.remove('hidden');
+                        
+                        switchTab('dashboard');
+                    } else {
+                        Swal.fire('Access Denied', res.error || 'Invalid Key', 'error');
+                        sessionStorage.removeItem('adminSecret');
+                    }
+                })
+                .withFailureHandler(err => {
+                    document.getElementById('loginBtnText').innerText = "Login & Fetch Data";
+                    document.getElementById('loginSpinner').classList.add('hidden');
+                    Swal.fire('Error', err.toString(), 'error');
+                })
+                .getAdminData(secret);
+        }
+
+        function logoutAdmin() {
+            sessionStorage.removeItem('adminSecret');
+            window.location.reload();
+        }
+
+        // ==========================================
+        // UI NAVIGATION
+        // ==========================================
+        function switchTab(tab) {
+            document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+            document.getElementById(`nav-${tab}`).classList.add('active');
+            
+            const content = document.getElementById('contentArea');
+            const title = document.getElementById('pageTitle');
+
+            if (tab === 'dashboard') {
+                title.innerText = "Overview Dashboard";
+                renderDashboard(content);
+            } else if (tab === 'products') {
+                title.innerText = "Product Management";
+                renderProducts(content);
+            } else if (tab === 'orders') {
+                title.innerText = "Order Management";
+                renderOrders(content);
+            }
+        }
+
+        // ==========================================
+        // DASHBOARD RENDER
+        // ==========================================
+        function renderDashboard(container) {
+            const totalProducts = localData.products.length;
+            const totalOrders = localData.orders.length;
+            const pendingOrders = localData.orders.filter(o => String(o[10]).toLowerCase() === 'processing').length;
+            const totalRevenue = localData.orders.filter(o => String(o[10]).toLowerCase() === 'delivered')
+                                     .reduce((sum, o) => sum + (parseFloat(o[9]) || 0), 0);
+
+            container.innerHTML = `
+                <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+                    <div class="bg-white p-6 rounded-xl shadow-sm border border-gray-100 flex items-center gap-4">
+                        <div class="w-12 h-12 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center text-xl"><i class="fas fa-box"></i></div>
+                        <div><p class="text-sm text-gray-500 font-bold">Total Products</p><p class="text-2xl font-black text-gray-800">${totalProducts}</p></div>
+                    </div>
+                    <div class="bg-white p-6 rounded-xl shadow-sm border border-gray-100 flex items-center gap-4">
+                        <div class="w-12 h-12 rounded-full bg-yellow-100 text-yellow-600 flex items-center justify-center text-xl"><i class="fas fa-shopping-cart"></i></div>
+                        <div><p class="text-sm text-gray-500 font-bold">Pending Orders</p><p class="text-2xl font-black text-gray-800">${pendingOrders}</p></div>
+                    </div>
+                    <div class="bg-white p-6 rounded-xl shadow-sm border border-gray-100 flex items-center gap-4">
+                        <div class="w-12 h-12 rounded-full bg-green-100 text-green-600 flex items-center justify-center text-xl"><i class="fas fa-check-circle"></i></div>
+                        <div><p class="text-sm text-gray-500 font-bold">Total Orders</p><p class="text-2xl font-black text-gray-800">${totalOrders}</p></div>
+                    </div>
+                    <div class="bg-white p-6 rounded-xl shadow-sm border border-gray-100 flex items-center gap-4">
+                        <div class="w-12 h-12 rounded-full bg-purple-100 text-purple-600 flex items-center justify-center text-xl"><i class="fas fa-money-bill-wave"></i></div>
+                        <div><p class="text-sm text-gray-500 font-bold">Revenue (Delivered)</p><p class="text-2xl font-black text-gray-800">৳${totalRevenue.toLocaleString()}</p></div>
+                    </div>
+                </div>
+            `;
+        }
+
+        // ==========================================
+        // PRODUCTS MANAGEMENT (CRUD)
+        // ==========================================
+        function renderProducts(container) {
+            let trs = localData.products.map(p => `
+                <tr class="border-b border-gray-100 hover:bg-gray-50">
+                    <td class="p-3"><img src="${p.imagemain}" class="w-10 h-10 rounded object-cover border"></td>
+                    <td class="p-3 font-medium text-sm text-gray-800">${p.id}</td>
+                    <td class="p-3 text-sm text-gray-600">${p.name}</td>
+                    <td class="p-3 text-sm font-bold text-blue-600">৳${p.discountprice || p.price}</td>
+                    <td class="p-3 text-sm">${p.totalstock}</td>
+                    <td class="p-3">
+                        <button onclick="openProductModal('${p.id}')" class="text-blue-500 hover:bg-blue-100 p-2 rounded transition"><i class="fas fa-edit"></i></button>
+                        <button onclick="deleteProduct('${p.id}')" class="text-red-500 hover:bg-red-100 p-2 rounded transition ml-2"><i class="fas fa-trash"></i></button>
+                    </td>
+                </tr>
+            `).join('');
+
+            container.innerHTML = `
+                <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                    <div class="p-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
+                        <input type="text" placeholder="Search locally..." class="border rounded px-3 py-1.5 text-sm w-64 outline-none focus:ring-1 focus:ring-blue-500">
+                        <button onclick="openProductModal()" class="bg-blue-600 text-white px-4 py-2 rounded font-bold text-sm hover:bg-blue-700 shadow"><i class="fas fa-plus mr-1"></i> Add Product</button>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left border-collapse">
+                            <thead>
+                                <tr class="bg-gray-100 text-gray-600 text-xs uppercase tracking-wider">
+                                    <th class="p-3 font-bold">Image</th>
+                                    <th class="p-3 font-bold">ID</th>
+                                    <th class="p-3 font-bold">Name</th>
+                                    <th class="p-3 font-bold">Price</th>
+                                    <th class="p-3 font-bold">Stock</th>
+                                    <th class="p-3 font-bold">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>${trs}</tbody>
+                        </table>
+                    </div>
+                </div>
+            `;
+        }
+
+        function openProductModal(id = null) {
+            document.getElementById('productForm').reset();
+            document.getElementById('productModalTitle').innerText = id ? "Edit Product" : "Add New Product";
+            
+            if (id) {
+                const p = localData.products.find(x => String(x.id) === String(id));
+                if(p) {
+                    document.getElementById('p_id').value = p.id;
+                    document.getElementById('p_id').readOnly = true; // Protect ID on edit
+                    document.getElementById('p_name').value = p.name;
+                    document.getElementById('p_category').value = p.category;
+                    document.getElementById('p_price').value = p.price;
+                    document.getElementById('p_discount').value = p.discountprice;
+                    document.getElementById('p_stock').value = p.totalstock;
+                    document.getElementById('p_image').value = p.imagemain;
+                    document.getElementById('p_desc').value = p.description || '';
+                    
+                    // Reconstruct variant string
+                    if(p.variants && Array.isArray(p.variants)) {
+                        document.getElementById('p_variants').value = p.variants.map(v => `${v.name}:${v.price}:${v.stock}:${v.extradeliverycharge||0}`).join(', ');
+                    }
+                }
+            } else {
+                document.getElementById('p_id').readOnly = false;
+            }
+            
+            document.getElementById('productModal').classList.remove('hidden');
+            document.getElementById('productModal').classList.add('flex');
+        }
+
+        function closeProductModal() {
+            document.getElementById('productModal').classList.add('hidden');
+            document.getElementById('productModal').classList.remove('flex');
+        }
+
+        function saveProduct() {
+            const pData = {
+                id: document.getElementById('p_id').value.trim(),
+                name: document.getElementById('p_name').value.trim(),
+                category: document.getElementById('p_category').value.trim(),
+                price: parseFloat(document.getElementById('p_price').value) || 0,
+                discountprice: parseFloat(document.getElementById('p_discount').value) || 0,
+                totalstock: parseInt(document.getElementById('p_stock').value) || 0,
+                imagemain: document.getElementById('p_image').value.trim(),
+                description: document.getElementById('p_desc').value.trim(),
+                variants: document.getElementById('p_variants').value.trim(),
+                stockstatus: parseInt(document.getElementById('p_stock').value) > 0 ? 'In Stock' : 'Out of Stock'
+            };
+
+            if(!pData.id || !pData.name || !pData.price) return Swal.fire('Warning', 'ID, Name, and Price are required', 'warning');
+
+            Swal.fire({ title: 'Syncing to Google Sheets...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
+
+            // Direct Save to Backend (Saves Quota vs saving all products)
+            google.script.run
+                .withSuccessHandler(res => {
+                    if(res.success) {
+                        Swal.fire('Saved!', 'Product synced to database', 'success');
+                        closeProductModal();
+                        
+                        // Update Local State optimistically
+                        const existingIdx = localData.products.findIndex(x => String(x.id) === String(pData.id));
+                        if(existingIdx > -1) {
+                            localData.products[existingIdx] = {...localData.products[existingIdx], ...pData};
+                        } else {
+                            localData.products.unshift(pData);
+                        }
+                        renderProducts(document.getElementById('contentArea'));
+                    } else {
+                        Swal.fire('Error', res.error, 'error');
+                    }
+                })
+                .withFailureHandler(err => Swal.fire('Error', err.toString(), 'error'))
+                .adminSaveProduct(adminSecret, pData);
+        }
+
+        function deleteProduct(id) {
+            Swal.fire({
+                title: 'Are you sure?',
+                text: "This will permanently delete the product from the database.",
+                icon: 'warning',
+                showCancelButton: true,
+                confirmButtonColor: '#d33',
+                confirmButtonText: 'Yes, delete it!'
+            }).then((result) => {
+                if (result.isConfirmed) {
+                    Swal.fire({ title: 'Deleting...', didOpen: () => Swal.showLoading() });
+                    google.script.run
+                        .withSuccessHandler(res => {
+                            if(res.success) {
+                                Swal.fire('Deleted!', '', 'success');
+                                localData.products = localData.products.filter(x => String(x.id) !== String(id));
+                                renderProducts(document.getElementById('contentArea'));
+                            } else {
+                                Swal.fire('Error', res.error, 'error');
+                            }
+                        })
+                        .withFailureHandler(err => Swal.fire('Error', err.toString(), 'error'))
+                        .adminDeleteProduct(adminSecret, id);
+                }
+            });
+        }
+
+        // ==========================================
+        // ORDERS MANAGEMENT
+        // ==========================================
+        function renderOrders(container) {
+            // Reusing the structure from the backend:
+            // [0:Date, 1:OrderID, 2:Name, 3:Phone, 4:Dist, 5:Upa, 6:Address, 7:Products, 8:Qty, 9:Total, 10:Status]
+            
+            // Sort by latest (assuming they are appended sequentially in the sheet)
+            const sortedOrders = [...localData.orders].reverse();
+
+            let trs = sortedOrders.map(o => {
+                const status = String(o[10]).trim();
+                let statusBadge = 'bg-gray-100 text-gray-800';
+                if(status.toLowerCase() === 'processing') statusBadge = 'bg-yellow-100 text-yellow-800';
+                if(status.toLowerCase() === 'shipped') statusBadge = 'bg-blue-100 text-blue-800';
+                if(status.toLowerCase() === 'delivered') statusBadge = 'bg-green-100 text-green-800';
+                if(status.toLowerCase() === 'cancelled') statusBadge = 'bg-red-100 text-red-800';
+
+                // Format Date nicely
+                let dateStr = 'Unknown';
+                try { dateStr = new Date(o[0]).toLocaleDateString('en-GB'); } catch(e){}
+
+                return `
+                <tr class="border-b border-gray-100 hover:bg-gray-50">
+                    <td class="p-3 text-xs text-gray-500">${dateStr}</td>
+                    <td class="p-3 font-bold text-sm text-gray-800">${o[1]}</td>
+                    <td class="p-3 text-sm text-gray-600">
+                        <div class="font-bold text-gray-800">${o[2]}</div>
+                        <div class="text-xs">${o[3]}</div>
+                    </td>
+                    <td class="p-3 text-sm font-bold text-blue-600">৳${o[9]}</td>
+                    <td class="p-3">
+                        <span class="px-2 py-1 rounded text-[10px] font-bold uppercase ${statusBadge}">${status}</span>
+                    </td>
+                    <td class="p-3">
+                        <select onchange="updateOrderStatus('${o[1]}', this.value)" class="border rounded p-1 text-xs outline-none bg-white cursor-pointer hover:border-blue-500">
+                            <option value="">Change...</option>
+                            <option value="Processing">Processing</option>
+                            <option value="Shipped">Shipped</option>
+                            <option value="Delivered">Delivered</option>
+                            <option value="Cancelled">Cancelled</option>
+                        </select>
+                    </td>
+                </tr>
+            `}).join('');
+
+            container.innerHTML = `
+                <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                    <div class="p-4 border-b border-gray-100 bg-gray-50">
+                        <h3 class="font-bold text-gray-700">Recent Orders</h3>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left border-collapse">
+                            <thead>
+                                <tr class="bg-gray-100 text-gray-600 text-xs uppercase tracking-wider">
+                                    <th class="p-3 font-bold">Date</th>
+                                    <th class="p-3 font-bold">Order ID</th>
+                                    <th class="p-3 font-bold">Customer</th>
+                                    <th class="p-3 font-bold">Total</th>
+                                    <th class="p-3 font-bold">Status</th>
+                                    <th class="p-3 font-bold">Action</th>
+                                </tr>
+                            </thead>
+                            <tbody>${trs}</tbody>
+                        </table>
+                    </div>
+                </div>
+            `;
+        }
+
+        function updateOrderStatus(orderId, newStatus) {
+            if(!newStatus) return;
+            Swal.fire({
+                title: `Update to ${newStatus}?`,
+                text: "This will trigger emails/SMS to the customer.",
+                icon: 'question',
+                showCancelButton: true,
+                confirmButtonText: 'Yes, update'
+            }).then((result) => {
+                if(result.isConfirmed) {
+                    Swal.fire({ title: 'Updating...', didOpen: () => Swal.showLoading() });
+                    // Using your existing backend function
+                    google.script.run
+                        .withSuccessHandler(res => {
+                            if(res.success) {
+                                Swal.fire('Updated!', res.message, 'success');
+                                // Update local state
+                                const o = localData.orders.find(x => String(x[1]) === String(orderId));
+                                if(o) o[10] = newStatus;
+                                renderOrders(document.getElementById('contentArea'));
+                            } else {
+                                Swal.fire('Error', res.error, 'error');
+                            }
+                        })
+                        .withFailureHandler(err => Swal.fire('Error', err.toString(), 'error'))
+                        .adminUpdateOrderStatus(orderId, newStatus);
+                }
+            });
+        }
+    </script>
+</body>
+</html>
