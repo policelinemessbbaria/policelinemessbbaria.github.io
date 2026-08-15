@@ -1357,7 +1357,7 @@ font-weight: bold;
     // VERCEL/NETLIFY HOSTING HELPER (POLYFILL FOR GOOGLE.SCRIPT.RUN)
     // ============================================================
     // নিচে আপনার Google Apps Script-এর বর্তমান Web App URL-টি বসিয়ে দিন:
-    const GAS_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbxUvKcQrHgUbmO12CVpmoFursZyopziiej06Bib1SyV09fT5jEwByZK9szYHK5hn20QEg/exec"; 
+    const GAS_WEB_APP_URL = ""; 
 
 // ✅ সঠিক পলিফিল (Proxy Chain ভাঙে না, Handler আলাদা থাকে)
 if (typeof google === 'undefined' || !google.script) {
@@ -6968,7 +6968,7 @@ function openProductInquiry() {
     // ==========================================
     // আপডেট: ইমেজের বদলে প্রোডাক্টের ওয়েবসাইট লিংক নেওয়া হচ্ছে
     // ==========================================
-const productLink = window.location.pathname + window.location.search;
+const productLink = window.location.origin + window.location.pathname + window.location.search;
     // ==========================================
 
     const selectedVariant = appData.currentSelectedVariant;
