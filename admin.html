@@ -267,9 +267,6 @@ function renderDashboard(c) {
     const allOrders = localData.orders || [];
     const products = localData.products || [];
     
-    // ==========================================
-    // ১. ইনভেন্টরি ভ্যালু ক্যালকুলেশন
-    // ==========================================
     let totalInventoryCost = 0;
     products.forEach(p => {
         if (p.variants && p.variants.length > 0) {
@@ -284,9 +281,6 @@ function renderDashboard(c) {
         }
     });
 
-    // ==========================================
-    // ২. ডেট ফিল্টারিং
-    // ==========================================
     let startDate = new Date('2020-01-01T00:00:00');
     const now = new Date();
     
@@ -306,29 +300,80 @@ function renderDashboard(c) {
     });
 
     // ==========================================
-    // ৩. অর্ডার স্ট্যাটাস ব্রেকডাউন (রিটার্ন আলাদা)
+    // স্ট্যাটাস অনুযায়ী অর্ডার আলাদা করা হলো
     // ==========================================
-    let totalOrders = filteredOrders.length;
     let deliveredOrders = filteredOrders.filter(o => String(o[10]).toLowerCase() === 'delivered');
-    let returnedOrders = filteredOrders.filter(o => String(o[10]).toLowerCase() === 'cancelled' && (parseFloat(o[19]) || 0) > 0);
-    let regularCancelled = filteredOrders.filter(o => String(o[10]).toLowerCase() === 'cancelled' && !(parseFloat(o[19]) || 0) > 0);
+    let cancelledOrders = filteredOrders.filter(o => String(o[10]).toLowerCase() === 'cancelled');
+    let returnOrders = filteredOrders.filter(o => String(o[10]).toLowerCase() === 'return');
+    let exchangeOrders = filteredOrders.filter(o => String(o[10]).toLowerCase().includes('exchange'));
     let shippedOrders = filteredOrders.filter(o => String(o[10]).toLowerCase() === 'shipped');
     let processingOrders = filteredOrders.filter(o => String(o[10]).toLowerCase() === 'processing');
     
     let totalRevenue = deliveredOrders.reduce((sum, o) => sum + (parseFloat(o[9]) || 0), 0);
     let totalProfit = 0;
+    let sReturnLoss = 0;
+    let sExchangeLoss = 0;
+    
+    // ১. ডেলিভার্ড অর্ডারের প্রফিট যোগ
     deliveredOrders.forEach(o => {
-        try { totalProfit += (parseFloat(o[9])||0) - (parseFloat(o[20])||0) - (parseFloat(o[21])||0) - (parseFloat(o[19])||0); } catch(e){}
+        try { 
+            let pc = parseFloat(o[20])||0;
+            let dc = parseFloat(o[21])||0;
+            if(pc===0 && dc===0) {
+                try {
+                    const it = JSON.parse(o[7]||"[]");
+                    it.forEach(i => {
+                        const p = localData.products.find(x => String(x.id) === String(i.id));
+                        if(p) pc += parseProductCost(p.costprice, i.selectedVariant) * (parseInt(i.quantity||i.qty)||1);
+                    });
+                    dc = calculateActualCourier(it);
+                } catch(e){}
+            }
+            totalProfit += (parseFloat(o[9])||0) - pc - dc - (parseFloat(o[19])||0); 
+        } catch(e){}
     });
 
-    // ==========================================
-    // ৪. রিটার্ন লস ক্যালকুলেশন
-    // ==========================================
-    let returnLoss = returnedOrders.reduce((sum, o) => sum + (parseFloat(o[19]) || 0), 0);
+    // ২. রিটার্ন অর্ডারের লস বাদ (আলাদাভাবে হিসাব রাখা হলো)
+    returnOrders.forEach(o => {
+        try {
+            let dc = parseFloat(o[21])||0;
+            if(dc === 0) {
+                try {
+                    const it = JSON.parse(o[7]||"[]");
+                    dc = calculateActualCourier(it);
+                } catch(e){}
+            }
+            const ex = parseFloat(o[19])||0;
+            const loss = dc + ex;
+            sReturnLoss += loss;
+            totalProfit -= loss; 
+        } catch(e){}
+    });
 
-    // ==========================================
-    // ৫. সম্পূর্ণ প্রোডাক্ট সেলস ম্যাপ তৈরি (ভ্যারিয়েন্ট সহ)
-    // ==========================================
+    // ৩. এক্সচেঞ্জ অর্ডারের হিসাব (FIXED: আগের লাভ থেকে নতুন কুরিয়ার বাদ)
+    exchangeOrders.forEach(o => {
+        try {
+            let pc = parseFloat(o[20])||0;
+            let dc = parseFloat(o[21])||0;
+            if(pc===0 && dc===0) {
+                try {
+                    const it = JSON.parse(o[7]||"[]");
+                    it.forEach(i => {
+                        const p = localData.products.find(x => String(x.id) === String(i.id));
+                        if(p) pc += parseProductCost(p.costprice, i.selectedVariant) * (parseInt(i.quantity||i.qty)||1);
+                    });
+                    dc = calculateActualCourier(it);
+                } catch(e){}
+            }
+            const ex = parseFloat(o[19])||0;
+            
+            // এক্সচেঞ্জ হলেও মূল পণ্যের টাকা আয় হয়ে গেছে, তাই সেই হিসাবের সাথে নতুন কুরিয়ার খরচ বাদ দেওয়া হচ্ছে
+            const orderProfit = (parseFloat(o[9])||0) - pc - dc - ex;
+            
+            sExchangeLoss += ex; // কার্ডে শুধু খরচ দেখানোর জন্য
+            totalProfit += orderProfit; // নেট প্রফিটে যোগ হবে (লাভ থাকলে যোগ বিয়োগ হবে, লস হলে মাইনাস হবে)
+        } catch(e){}
+    });
     const productSalesMap = {};
     
     products.forEach(p => {
@@ -375,11 +420,8 @@ function renderDashboard(c) {
         return inventorySort === 'most' ? (b.totalQty - a.totalQty) : (a.totalQty - b.totalQty);
     });
 
-    // ==========================================
-    // HTML জেনারেশন
-    // ==========================================
     const filterBtns = [
-        { key: 'all', label: 'সব সময়' },
+        { key: 'all', label: 'সব সময়' },
         { key: 'today', label: 'আজকে' },
         { key: '7d', label: 'গত ৭ দিন' },
         { key: '30d', label: 'গত ৩০ দিন' }
@@ -417,33 +459,31 @@ function renderDashboard(c) {
         `;
     }).join('');
 
+    const totalOrders = filteredOrders.length;
+    const successRate = totalOrders > 0 ? ((deliveredOrders.length / totalOrders) * 100).toFixed(1) : 0;
+
     c.innerHTML = `
-        <!-- প্রথম সারি: ৫টি মেট্রিক্স (রিটার্ন লস যোগ) -->
-        <div class="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
+        <div class="grid grid-cols-2 lg:grid-cols-4 gap-5 mb-6">
             <div class="bg-white p-5 rounded-xl shadow-sm border flex items-center gap-4">
                 <div class="w-12 h-12 rounded-xl bg-purple-100 text-purple-600 flex items-center justify-center text-lg"><i class="fas fa-warehouse"></i></div>
-                <div><p class="text-xs text-gray-500 font-bold uppercase">ইনভেন্টরি ভ্যালু</p><p class="text-2xl font-black text-gray-800">৳${totalInventoryCost.toLocaleString()}</p><p class="text-[10px] text-gray-400">(ক্রয়মূল্য অনুযায়ী)</p></div>
+                <div><p class="text-xs text-gray-500 font-bold uppercase">ইনভেন্টরি ভ্যালু</p><p class="text-2xl font-black text-gray-800">৳${totalInventoryCost.toLocaleString()}</p><p class="text-[10px] text-gray-400">(ক্রয়মূল্য অনুযায়ী)</p></div>
             </div>
             <div class="bg-white p-5 rounded-xl shadow-sm border flex items-center gap-4">
                 <div class="w-12 h-12 rounded-xl bg-blue-100 text-blue-600 flex items-center justify-center text-lg"><i class="fas fa-shopping-cart"></i></div>
-                <div><p class="text-xs text-gray-500 font-bold uppercase">মোট অর্ডার</p><p class="text-2xl font-black text-gray-800">${totalOrders}</p><p class="text-[10px] text-gray-400">(${dashboardFilter === 'all' ? 'সব সময়' : dashboardFilter === 'today' ? 'আজকে' : dashboardFilter === '7d' ? 'গত ৭ দিন' : 'গত ৩০ দিন'})</p></div>
+                <div><p class="text-xs text-gray-500 font-bold uppercase">মোট অর্ডার</p><p class="text-2xl font-black text-gray-800">${totalOrders}</p><p class="text-[10px] text-gray-400">(${dashboardFilter === 'all' ? 'সব সময়' : dashboardFilter === 'today' ? 'আজকে' : dashboardFilter === '7d' ? 'গত ৭ দিন' : 'গত ৩০ দিন'})</p></div>
             </div>
             <div class="bg-white p-5 rounded-xl shadow-sm border flex items-center gap-4">
                 <div class="w-12 h-12 rounded-xl bg-green-100 text-green-600 flex items-center justify-center text-lg"><i class="fas fa-check-double"></i></div>
-                <div><p class="text-xs text-gray-500 font-bold uppercase">ডেলিভারি ও আয়</p><p class="text-2xl font-black text-gray-800">৳${totalRevenue.toLocaleString()}</p><p class="text-[10px] text-gray-400">${deliveredOrders.length}টি ডেলিভারি</p></div>
+                <div><p class="text-xs text-gray-500 font-bold uppercase">ডেলিভারি ও আয়</p><p class="text-2xl font-black text-gray-800">৳${totalRevenue.toLocaleString()}</p><p class="text-[10px] text-gray-400">${deliveredOrders.length}টি ডেলিভারি</p></div>
             </div>
             <div class="bg-white p-5 rounded-xl shadow-sm border flex items-center gap-4">
                 <div class="w-12 h-12 rounded-xl ${totalProfit >= 0 ? 'bg-emerald-100 text-emerald-600' : 'bg-red-100 text-red-600'} flex items-center justify-center text-lg"><i class="fas fa-${totalProfit >= 0 ? 'trending-up' : 'trending-down'}"></i></div>
-                <div><p class="text-xs text-gray-500 font-bold uppercase">নেট প্রফিট</p><p class="text-2xl font-black ${totalProfit >= 0 ? 'text-emerald-700' : 'text-red-700'}">৳${totalProfit.toFixed(0)}</p><p class="text-[10px] text-gray-400">খরচ বাদ দিয়ে</p></div>
-            </div>
-            <div class="bg-white p-5 rounded-xl shadow-sm border flex items-center gap-4 ${returnLoss > 0 ? 'ring-2 ring-orange-300' : ''}">
-                <div class="w-12 h-12 rounded-xl bg-orange-100 text-orange-600 flex items-center justify-center text-lg"><i class="fas fa-undo-alt"></i></div>
-                <div><p class="text-xs text-gray-500 font-bold uppercase">রিটার্ন লস</p><p class="text-2xl font-black text-orange-600">৳${returnLoss.toLocaleString()}</p><p class="text-[10px] text-gray-400">${returnedOrders.length}টি রিটার্ন</p></div>
+                <div><p class="text-xs text-gray-500 font-bold uppercase">নেট প্রফিট</p><p class="text-2xl font-black ${totalProfit >= 0 ? 'text-emerald-700' : 'text-red-700'}">৳${totalProfit.toFixed(0)}</p><p class="text-[10px] text-gray-400">রিটার্ন ও এক্সচেঞ্জ লস বাদ</p></div>
             </div>
         </div>
 
-        <!-- দ্বিতীয় সারি: অর্ডার স্ট্যাটাস ব্রেকডাউন (ক্যান্সেল + রিটার্ন আলাদা) -->
-        <div class="grid grid-cols-2 lg:grid-cols-6 gap-4 mb-6">
+        <!-- উপরের সারি: মূল স্ট্যাটাসগুলো -->
+        <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
             <div class="bg-yellow-50 border border-yellow-200 p-4 rounded-xl text-center">
                 <p class="text-2xl font-black text-yellow-700">${processingOrders.length}</p>
                 <p class="text-xs font-bold text-yellow-500 mt-1">প্রসেসিং</p>
@@ -456,21 +496,31 @@ function renderDashboard(c) {
                 <p class="text-2xl font-black text-green-700">${deliveredOrders.length}</p>
                 <p class="text-xs font-bold text-green-500 mt-1">ডেলিভার্ড</p>
             </div>
-            <div class="bg-red-50 border border-red-200 p-4 rounded-xl text-center">
-                <p class="text-2xl font-black text-red-700">${regularCancelled.length}</p>
-                <p class="text-xs font-bold text-red-500 mt-1">ক্যান্সেল</p>
-            </div>
-            <div class="bg-orange-50 border border-orange-200 p-4 rounded-xl text-center ${returnLoss > 0 ? 'ring-2 ring-orange-300' : ''}">
-                <p class="text-2xl font-black text-orange-700">${returnedOrders.length}</p>
-                <p class="text-xs font-bold text-orange-500 mt-1">রিটার্ন</p>
-            </div>
-            <div class="bg-gray-50 border border-gray-200 p-4 rounded-xl flex flex-col items-center justify-center cursor-pointer hover:bg-gray-100 transition" onclick="switchTab('orders')">
-                <p class="text-2xl font-black text-gray-700">${totalOrders > 0 ? ((deliveredOrders.length / totalOrders) * 100).toFixed(1) : 0}%</p>
-                <p class="text-xs font-bold text-gray-500 mt-1">সাফল্যতা হার <i class="fas fa-arrow-right ml-1 text-[10px]"></i></p>
+            <div class="bg-gray-50 border border-gray-200 p-4 rounded-xl text-center">
+                <p class="text-2xl font-black text-gray-600">${cancelledOrders.length}</p>
+                <p class="text-xs font-bold text-gray-500 mt-1">ক্যান্সেলড</p>
+                <p class="text-[9px] text-gray-400 mt-1">কোনো লস নেই</p>
             </div>
         </div>
 
-        <!-- তৃতীয় সারি: পণ্য ও ভ্যারিয়েন্ট বিক্রি রিপোর্ট -->
+        <!-- নিচের সারি: লস ও সাফল্যতার হার -->
+        <div class="grid grid-cols-3 gap-4 mb-6">
+            <div class="bg-orange-50 border border-orange-200 p-4 rounded-xl text-center">
+                <p class="text-2xl font-black text-orange-700">${returnOrders.length}</p>
+                <p class="text-xs font-bold text-orange-500 mt-1">রিটার্ন</p>
+                <p class="text-[10px] text-orange-600 font-black mt-1 bg-orange-100 rounded py-0.5">-৳${sReturnLoss.toFixed(0)} লস</p>
+            </div>
+            <div class="bg-pink-50 border border-pink-200 p-4 rounded-xl text-center">
+                <p class="text-2xl font-black text-pink-700">${exchangeOrders.length}</p>
+                <p class="text-xs font-bold text-pink-500 mt-1">এক্সচেঞ্জ</p>
+                <p class="text-[10px] text-pink-600 font-black mt-1 bg-pink-100 rounded py-0.5">-৳${sExchangeLoss.toFixed(0)} লস</p>
+            </div>
+            <div class="bg-teal-50 border border-teal-200 p-4 rounded-xl flex flex-col items-center justify-center cursor-pointer hover:bg-teal-100 transition" onclick="switchTab('orders')">
+                <p class="text-2xl font-black text-teal-700">${successRate}%</p>
+                <p class="text-xs font-bold text-teal-500 mt-1">সাফল্যতা হার <i class="fas fa-arrow-right ml-1 text-[10px]"></i></p>
+            </div>
+        </div>
+
         <div class="bg-white rounded-xl shadow-sm border overflow-hidden mb-6">
             <div class="p-4 border-b bg-gray-50 flex flex-col md:flex-row justify-between items-start md:items-center gap-3">
                 <div>
@@ -607,80 +657,162 @@ function deleteGenericRow(key,kv){
     });
 }
 function renderOrders(c){
-    const sorted=[...localData.orders].reverse();let sP=0,sC=0,sD=0,sE=0,sPr=0,sReturnLoss=0;
+    const sorted=[...localData.orders].reverse();
+    let sP=0, sC=0, sD=0, sE=0, sPr=0, sReturnLoss=0, sExchangeLoss=0;
+    
     let trs=sorted.map(o=>{
         const st=String(o[10]||'').trim().toLowerCase();
         const ex=parseFloat(o[19])||0;
-        const isReturned=st==='cancelled'&&ex>0;
         
         let bg='bg-gray-100 text-gray-800',statusText=st;
         if(st==='processing'){bg='bg-yellow-100 text-yellow-800';statusText='Processing';}
         if(st==='shipped'){bg='bg-blue-100 text-blue-800';statusText='Shipped';}
         if(st==='delivered'){bg='bg-green-100 text-green-800';statusText='Delivered';}
-        if(st==='cancelled'){
-            if(isReturned){bg='bg-orange-100 text-orange-800';statusText='রিটার্নড';}
-            else{bg='bg-red-100 text-red-800';statusText='Cancelled';}
-        }
+        if(st==='return'){bg='bg-orange-100 text-orange-800';statusText='রিটার্নড';}
+        if(st==='exchange customer'){bg='bg-cyan-100 text-cyan-800';statusText='এক্সচেঞ্জ (কাস্টমার)';}
+        if(st==='exchange seller'){bg='bg-pink-100 text-pink-800';statusText='এক্সচেঞ্জ (সেলার)';}
+        if(st==='cancelled'){bg='bg-red-100 text-red-800';statusText='Cancelled';}
         
         let dt='';try{const d=new Date(o[0]);dt=d.toLocaleDateString('en-GB',{day:'2-digit',month:'short'})+', '+d.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit',hour12:true});}catch(e){}
         const paid=parseFloat(o[9])||0,pc=parseFloat(o[20])||0,dc=parseFloat(o[21])||0;
         
         if(pc===0&&dc===0){try{const it=JSON.parse(o[7]||"[]");it.forEach(i=>{const p=localData.products.find(x=>String(x.id)===String(i.id));if(p)pc+=parseProductCost(p.costprice,i.selectedVariant)*(parseInt(i.quantity||i.qty)||1);});dc=calculateActualCourier(it);}catch(e){}}
         
-        const np=paid-pc-dc-ex;
-        if(st==='delivered'){sP+=paid;sC+=pc;sD+=dc;sE+=ex;sPr+=np;}
-        if(isReturned) sReturnLoss+=ex;
+        // ==========================================
+        // স্মার্ট প্রফিট ক্যালকুলেশন (EXCHANGE LOGIC FIXED)
+        // ==========================================
+        let np = 0;
+        let profitClass = 'text-gray-600';
+        let profitPrefix = '';
+        let profitDisplay = '0'; 
+        
+        if(st === 'delivered') {
+            np = paid - pc - dc - ex;
+            profitClass = np >= 0 ? 'text-green-600' : 'text-red-600';
+            profitDisplay = np.toFixed(2);
+            sP+=paid; sC+=pc; sD+=dc; sE+=ex; sPr+=np;
+        } else if (st === 'processing' || st === 'shipped') {
+            np = paid - pc - dc - ex;
+            profitClass = 'text-purple-600 border border-dashed border-purple-300 rounded-md';
+            profitPrefix = '~';
+            profitDisplay = np.toFixed(2);
+        } else if (st === 'return') {
+            // রিটার্ন: পণ্য ফিরে এসেছে, শুধু কুরিয়ার খরচই লস
+            const currentLoss = dc + ex;
+            np = -currentLoss;
+            profitClass = 'text-orange-600';
+            profitDisplay = np.toFixed(2);
+            sReturnLoss += currentLoss;
+            sPr += np; 
+        } else if (st.includes('exchange')) {
+            // এক্সচেঞ্জ (কাস্টমার/সেলার উভয়): আগের লাভ থেকে নতুন কুরিয়ার খরচ বাদ
+            np = paid - pc - dc - ex;
+            profitClass = np >= 0 ? 'text-pink-500' : 'text-red-600';
+            profitDisplay = np.toFixed(2);
+            sPr += np; 
+            // ফুটারে শুধুমাত্র নতুন কুরিয়ার খরচটি আলাদা দেখানো হবে
+            sExchangeLoss += ex;
+        } else if (st === 'cancelled') {
+            profitClass = 'text-gray-400';
+            profitDisplay = '-';
+        }
         
         let itemsHtml='';try{JSON.parse(o[7]||"[]").forEach(i=>{itemsHtml+=`<div class="flex items-center gap-2 py-0.5"><img src="${i.image||'https://via.placeholder.com/24'}" class="img-thumb" onerror="this.src='https://via.placeholder.com/24'"><div class="min-w-0"><div class="text-[11px] font-semibold truncate">${i.name}${i.selectedVariant?' <span class=text-gray-400>['+i.selectedVariant+']</span>':''}</div></div></div>`;});}catch(e){}
 
-        const profitCell=isReturned
-            ?`<td class="p-2 text-xs font-black whitespace-nowrap text-orange-600">লস: -৳${ex}</td>`
-            :`<td class="p-2 text-xs font-black whitespace-nowrap ${np>=0?'text-green-600':'text-red-600'}">৳${np.toFixed(2)}</td>`;
-
-        return `<tr class="border-b border-gray-100 hover:bg-gray-50 ${isReturned?'bg-orange-50/30':''}"><td class="p-2 text-[10px] whitespace-nowrap">${dt}</td><td class="p-2 text-[10px] font-mono font-bold">${o[1]}</td><td class="p-2 text-[10px]"><b>${o[2]}</b><br><span class="text-gray-400">${o[3]}</span></td><td class="p-2 max-w-[180px]">${itemsHtml}</td><td class="p-2 text-xs font-bold text-blue-600 whitespace-nowrap">৳${paid.toLocaleString()}</td><td class="p-2 text-[10px] whitespace-nowrap">কস্ট: -৳${pc}<br>কুরিয়ার: -৳${dc}<br>${isReturned?'<span class="text-orange-600 font-bold">রিটার্ন: -৳'+ex+'</span><br>':'<input type="number" value="'+ex+'" onchange="updateExtraCost(\''+o[1]+'\',this.value)" class="w-12 border rounded p-0.5 text-[9px] text-center mt-1">'}</td><td class="p-2"><span class="px-1.5 py-0.5 rounded text-[9px] font-bold ${bg}">${statusText}</span></td>${profitCell}<td class="p-2"><select onchange="updateOrderStatus('${o[1]}',this.value)" class="border rounded p-1 text-[10px]"><option value="">Change</option><option value="Processing" ${st==='processing'?'selected':''}>Processing</option><option value="Shipped" ${st==='shipped'?'selected':''}>Shipped</option><option value="Delivered" ${st==='delivered'?'selected':''}>Delivered</option><option value="Cancelled" ${st==='cancelled'&&!isReturned?'selected':''}>Cancelled</option><option value="Returned" ${isReturned?'selected':''}>রিটার্নড</option></select></td></tr>`;
+        return `<tr class="border-b border-gray-100 hover:bg-gray-50"><td class="p-2 text-[10px] whitespace-nowrap">${dt}</td><td class="p-2 text-[10px] font-mono font-bold">${o[1]}</td><td class="p-2 text-[10px]"><b>${o[2]}</b><br><span class="text-gray-400">${o[3]}</span></td><td class="p-2 max-w-[180px]">${itemsHtml}</td><td class="p-2 text-xs font-bold text-blue-600 whitespace-nowrap">৳${paid.toLocaleString()}</td><td class="p-2 text-[10px] whitespace-nowrap">কস্ট: -৳${pc}<br>কুরিয়ার: -৳${dc}<br><input type="number" value="${ex}" onchange="updateExtraCost('${o[1]}',this.value)" class="w-12 border rounded p-0.5 text-[9px] text-center mt-1"></td><td class="p-2"><span class="px-1.5 py-0.5 rounded text-[9px] font-bold ${bg}">${statusText}</span></td><td class="p-2 text-xs font-black whitespace-nowrap ${profitClass}" title="${(st === 'processing' || st === 'shipped') ? 'সম্ভাব্য প্রফিট' : st === 'cancelled' ? 'কোনো লাভ-লস নেই' : st.includes('exchange') ? 'এক্সচেঞ্জ খরচ বাদ' : 'নেট প্রফিট'}">${profitPrefix}৳${profitDisplay}</td><td class="p-2"><select onchange="updateOrderStatus('${o[1]}',this.value)" class="border rounded p-1 text-[10px]"><option value="">Change</option><option value="Processing" ${st==='processing'?'selected':''}>Processing</option><option value="Shipped" ${st==='shipped'?'selected':''}>Shipped</option><option value="Delivered" ${st==='delivered'?'selected':''}>Delivered</option><option value="Cancelled" ${st==='cancelled'?'selected':''}>Cancelled</option><option value="Returned" ${st==='return'?'selected':''}>রিটার্নড</option><option value="Exchange Customer" ${st==='exchange customer'?'selected':''}>এক্সচেঞ্জ (কাস্টমার)</option><option value="Exchange Seller" ${st==='exchange seller'?'selected':''}>এক্সচেঞ্জ (সেলার)</option></select></td></tr>`;
     }).join('');
 
-    const actualNet=sPr-sReturnLoss;
-    c.innerHTML=`<div class="bg-white rounded-xl shadow-sm border overflow-hidden mb-4"><div class="tbl-wrap overflow-x-auto"><table class="w-full text-left min-w-[1100px]"><thead><tr class="bg-gray-100 text-[10px] text-gray-600 uppercase"><th class="p-2">Date</th><th class="p-2">ID</th><th class="p-2">Customer</th><th class="p-2">Products</th><th class="p-2">Paid</th><th class="p-2">Costs</th><th class="p-2">Status</th><th class="p-2">Profit</th><th class="p-2">Action</th></tr></thead><tbody>${trs}</tbody><tfoot>
-    <tr class="bg-blue-50 text-blue-900 font-bold text-[10px] border-t-2 border-blue-300"><td colspan="4" class="p-2 text-right">ডেলিভার্ড থেকে:</td><td class="p-2">৳${sP.toLocaleString()}</td><td class="p-2">কস্ট:-৳${sC} কুরিয়ার:-৳${sD}</td><td></td><td class="p-2 font-black ${sPr>=0?'text-green-700':'text-red-700'}">৳${sPr.toFixed(2)}</td><td></td></tr>
-    ${sReturnLoss>0?`<tr class="bg-orange-50 text-orange-800 font-bold text-[10px]"><td colspan="8" class="p-2 text-right">রিটার্ন লস (${sorted.filter(o=>String(o[10]).toLowerCase()==='cancelled'&&(parseFloat(o[19])||0)>0).length}টি):</td><td class="p-2 font-black text-orange-700">-৳${sReturnLoss.toLocaleString()}</td></tr><tr class="bg-gray-100 text-gray-900 font-bold text-[10px] border-t-2 border-gray-400"><td colspan="8" class="p-2 text-right">প্রকৃত নেট:</td><td class="p-2 font-black ${actualNet>=0?'text-green-700':'text-red-700'}">৳${actualNet.toFixed(2)}</td></tr>`:''}
-    </tfoot></table></div></div>`;
+    const deliveredProfit = sP - sC - sD - sE;
+
+    c.innerHTML=`<div class="bg-white rounded-xl shadow-sm border overflow-hidden mb-4"><div class="tbl-wrap overflow-x-auto"><table class="w-full text-left min-w-[1100px]"><thead><tr class="bg-gray-100 text-[10px] text-gray-600 uppercase"><th class="p-2">Date</th><th class="p-2">ID</th><th class="p-2">Customer</th><th class="p-2">Products</th><th class="p-2">Paid</th><th class="p-2">Costs</th><th class="p-2">Status</th><th class="p-2">Profit</th><th class="p-2">Action</th></tr></thead><tbody>${trs}</tbody>
+    
+    <tfoot>
+        <tr class="bg-green-50 text-green-800 font-bold text-[10px] border-t border-green-200">
+            <td colspan="4" class="p-2 text-right">✅ ডেলিভার্ড (মোট আয় ও লাভ):</td>
+            <td class="p-2 text-green-700">+৳${sP.toLocaleString()}</td>
+            <td class="p-2 text-gray-600">কস্ট: -৳${sC} | কুরিয়ার: -৳${sD}</td>
+            <td></td>
+            <td class="p-2 font-black text-green-700">+৳${deliveredProfit.toFixed(0)}</td>
+            <td></td>
+        </tr>
+        <tr class="bg-orange-50 text-orange-800 font-bold text-[10px] border-t border-orange-200">
+            <td colspan="7" class="p-2 text-right">🔄 রিটার্ন (মোট লস):</td>
+            <td class="p-2 font-black text-orange-700">-৳${sReturnLoss.toFixed(0)}</td>
+            <td></td>
+        </tr>
+        <tr class="bg-pink-50 text-pink-800 font-bold text-[10px] border-t border-pink-200">
+            <td colspan="7" class="p-2 text-right">🔁 এক্সচেঞ্জ (মোট নতুন কুরিয়ার খরচ):</td>
+            <td class="p-2 font-black text-pink-700">-৳${sExchangeLoss.toFixed(0)}</td>
+            <td></td>
+        </tr>
+        <tr class="bg-blue-100 text-blue-900 font-black text-xs border-t-2 border-blue-400">
+            <td colspan="7" class="p-2.5 text-right">চূড়ান্ত নেট প্রফিট:</td>
+            <td class="p-2.5 ${sPr>=0?'text-green-800':'text-red-800'}">৳${sPr.toFixed(0)}</td>
+            <td></td>
+        </tr>
+    </tfoot>
+    
+    </table></div></div>`;
 }
 function updateExtraCost(id,cost){Swal.fire({title:'Update Extra Cost?',icon:'question',showCancelButton:true}).then(r=>{if(r.isConfirmed){google.script.run.withSuccessHandler(res=>{if(res.success){const o=localData.orders.find(x=>x[1]===id);if(o)o[19]=cost;renderOrders(document.getElementById('contentArea'));}}).adminUpdateOrderExtraCost(adminSecret,id,cost);}else renderOrders(document.getElementById('contentArea'));});}
 function updateOrderStatus(id,st){
     if(!st)return;
-    
+
     // ==========================================
-    // রিটার্ন: ভিজ্যুয়াল ক্যালকুলেটর পপআপ
+    // ১. রিটার্ন — দুই স্টেপ: Cancelled (রিস্টক) → Return (ডিসপ্লে)
     // ==========================================
     if(st==='Returned'){
-        const existingCost = parseFloat((localData.orders.find(x=>x[1]===id)||{})[19]) || 0;
+        const order = localData.orders.find(x=>x[1]===id) || {};
+        const existingExtraCost = parseFloat(order[19]) || 0;
         
-        const popupHtml = `
-            <p class="text-sm text-gray-500 mb-4">কাস্টমার অর্ডার রিসিভ করেনি।<br>কুরিয়ার কোম্পানিকে কত টাকা পেমেন্ট করতে হয়েছে?</p>
-            <div class="flex items-center justify-center gap-2 sm:gap-4 bg-gray-50 rounded-xl p-4 border-2 border-dashed border-orange-300 flex-wrap">
-                <div class="text-center min-w-[80px]">
-                    <p class="text-[10px] text-gray-400 mb-1">আগের এক্সট্রা</p>
-                    <p class="text-xl font-black text-gray-600">৳${existingCost}</p>
-                </div>
-                <span class="text-2xl font-black text-gray-300">+</span>
-                <div class="text-center">
-                    <p class="text-[10px] text-orange-500 mb-1 font-bold">কুরিয়ার চার্জ</p>
-                    <input type="number" id="returnCourierInput" value="0" min="0" step="1"
-                        oninput="document.getElementById('returnTotalDisplay').textContent='৳'+(${existingCost}+parseFloat(this.value||0))"
-                        class="w-24 text-center text-xl font-black border-2 border-orange-300 rounded-lg p-2 focus:ring-2 focus:ring-orange-400 outline-none">
-                </div>
-                <span class="text-2xl font-black text-gray-300">=</span>
-                <div class="text-center min-w-[80px]">
-                    <p class="text-[10px] text-orange-600 mb-1 font-bold">মোট সেভ হবে</p>
-                    <p id="returnTotalDisplay" class="text-xl font-black text-orange-600">৳${existingCost}</p>
-                </div>
-            </div>
-        `;
-        
+        // ১ম বারের কুরিয়ার চার্জ (স্ন্যাপশট) বের করা
+        let firstCourier = parseFloat(order[21]) || 0;
+        if(firstCourier === 0) {
+            try {
+                const items = JSON.parse(order[7] || "[]");
+                firstCourier = calculateActualCourier(items);
+            } catch(e) {}
+        }
+
+        // ইনপুট ছাড়া আগে থেকে জমা থাকা খরচ
+        const existingLoss = existingExtraCost + firstCourier;
+
         Swal.fire({
-            title:'রিটার্ন কুরিয়ার চার্জ',
-            html: popupHtml,
+            title:'📦 অর্ডার রিটার্ন',
+            html:`
+                <p class="text-sm text-gray-800 text-left mb-4"><b>পণ্যটি কাস্টমার রিসিভ করেনি।</b> পণ্যের দাম বাদ দিয়ে শুধু কুরিয়ার ও অন্যান্য খরচগুলো আপনার লস হিসেবে ধরা হবে।</p>
+                
+                <div class="bg-gray-50 rounded-xl p-4 border border-gray-200 mb-3">
+                    <p class="text-[10px] text-gray-500 font-bold mb-2 uppercase tracking-wide">চূড়ান্ত লসের হিসাব</p>
+                    <div class="flex items-center justify-center gap-2 sm:gap-3 flex-wrap">
+                        <div class="text-center min-w-[80px] bg-white p-2 rounded-lg border">
+                            <p class="text-[10px] text-gray-500 mb-1">এক্সট্রা খরচ</p>
+                            <p class="text-lg font-black text-gray-700">-৳${existingExtraCost}</p>
+                        </div>
+                        <span class="text-xl font-black text-gray-300">+</span>
+                        <div class="text-center min-w-[80px] bg-white p-2 rounded-lg border">
+                            <p class="text-[10px] text-gray-500 mb-1">১ম কুরিয়ার</p>
+                            <p class="text-lg font-black text-gray-700">-৳${firstCourier}</p>
+                        </div>
+                        <span class="text-xl font-black text-gray-300">+</span>
+                        <div class="text-center min-w-[90px] bg-red-50 p-2 rounded-lg border-2 border-red-200">
+                            <p class="text-[10px] text-red-500 mb-1 font-bold">২য় রিটার্ন কুরিয়ার</p>
+                            <input type="number" id="returnCourierInput" value="0" min="0" step="1"
+                                oninput="document.getElementById('returnTotalDisplay').textContent='-৳'+(${existingLoss}+parseFloat(this.value||0))"
+                                class="w-20 text-center text-lg font-black border-2 border-red-300 rounded-md p-1 focus:ring-2 focus:ring-red-400 outline-none text-red-600">
+                        </div>
+                        <span class="text-xl font-black text-gray-300">=</span>
+                        <div class="text-center min-w-[100px] bg-red-100 p-2.5 rounded-lg border-2 border-red-400 shadow-sm">
+                            <p class="text-[10px] text-red-600 mb-1 font-bold">ফাইনাল মোট লস</p>
+                            <p id="returnTotalDisplay" class="text-xl font-black text-red-600">-৳${existingLoss}</p>
+                        </div>
+                    </div>
+                </div>
+                
+                <p class="text-[11px] text-gray-500 text-left leading-relaxed bg-blue-50 p-3 rounded-lg border border-blue-100">
+                    <i class="fas fa-info-circle text-blue-500 mr-1"></i> 
+                    প্রফিট কলামে এই ফাইনাল লসটি মাইনাস (-) হিসেবে যোগ হবে। রিটার্ন কুরিয়ারে কোনো খরচ না হলে <b>0</b> দিন।
+                </p>`,
             showCancelButton:true,
             confirmButtonText:'রিটার্ন কনফার্ম',
             confirmButtonColor:'#d33',
@@ -688,33 +820,189 @@ function updateOrderStatus(id,st){
             focusConfirm:false,
             preConfirm:()=>{
                 const courierCost=parseFloat(document.getElementById('returnCourierInput').value)||0;
-                if(courierCost<=0){Swal.showValidationMessage('কুরিয়ার চার্জ লিখুন');return false;}
-                return {courier: courierCost, total: existingCost + courierCost};
+                return {courier:courierCost, total: existingExtraCost + courierCost};
             }
         }).then(r=>{
             if(r.isConfirmed){
                 const totalCost=r.value.total;
                 Swal.fire({title:'প্রসেসিং...',allowOutsideClick:false,didOpen:()=>Swal.showLoading()});
+                // Step 1: Cancelled → রিস্টক হবে
                 google.script.run.withSuccessHandler(res=>{
                     if(res.success){
-                        const o=localData.orders.find(x=>x[1]===id);
-                        if(o)o[10]='Cancelled';
+                        // Step 2: Return → ডিসপ্লে পরিবর্তন (রিস্টক হবে না)
                         google.script.run.withSuccessHandler(res2=>{
                             if(res2.success){
-                                const o2=localData.orders.find(x=>x[1]===id);
-                                if(o2)o2[19]=totalCost;
-                                renderOrders(document.getElementById('contentArea'));
-                                Swal.fire({title:'রিটার্ন রেকর্ড হয়েছে!',html:`কুরিয়ার: ৳${r.value.courier}<br>মোট এক্সট্রা কস্ট: ৳${totalCost}`,icon:'success',timer:2000,showConfirmButton:false});
+                                // Step 3: ExtraCost সেভ
+                                google.script.run.withSuccessHandler(res3=>{
+                                    if(res3.success){
+                                        const o=localData.orders.find(x=>x[1]===id);
+                                        if(o){o[10]='Return';o[19]=totalCost;}
+                                        renderOrders(document.getElementById('contentArea'));
+                                        
+                                        const finalLoss = existingLoss + r.value.courier;
+                                        Swal.fire({title:'রিটার্ন রেকর্ড হয়েছে!',html:`
+                                            <div class="text-left text-sm text-gray-600 space-y-1">
+                                                <p>এক্সট্রা খরচ: <b class="text-gray-800">-৳${existingExtraCost}</b></p>
+                                                <p>১ম কুরিয়ার: <b class="text-gray-800">-৳${firstCourier}</b></p>
+                                                <p>রিটার্ন কুরিয়ার: <b class="text-gray-800">-৳${r.value.courier}</b></p>
+                                                <hr class="my-2 border-red-200">
+                                                <p class="text-red-600 font-bold text-base">মোট ক্ষতি: -৳${finalLoss}</p>
+                                            </div>`,icon:'success',timer:4000,showConfirmButton:false});
+                                    }else Swal.fire('Error',res3.error,'error');
+                                }).withFailureHandler(e=>Swal.fire('Error',e.toString(),'error')).adminUpdateOrderExtraCost(adminSecret,id,totalCost);
                             }else Swal.fire('Error',res2.error,'error');
-                        }).withFailureHandler(e=>Swal.fire('Error',e.toString(),'error')).adminUpdateOrderExtraCost(adminSecret,id,totalCost);
+                        }).withFailureHandler(e=>Swal.fire('Error',e.toString(),'error')).adminUpdateOrderStatus(adminSecret,id,'Return');
                     }else Swal.fire('Error',res.error,'error');
                 }).withFailureHandler(e=>Swal.fire('Error',e.toString(),'error')).adminUpdateOrderStatus(adminSecret,id,'Cancelled');
             }
         });
         return;
     }
-    
-    // বাকি সব স্ট্যাটাস (আগের মতোই)
+
+    // ==========================================
+    // ২. এক্সচেঞ্জ (কাস্টমার) — শুধু স্ট্যাটাস পরিবর্তন
+    // ==========================================
+    if(st==='Exchange Customer'){
+        const order=localData.orders.find(x=>x[1]===id);
+        let items=[];try{items=JSON.parse(order[7]||"[]");}catch(e){}
+
+        let itemsList=items.map(item=>{
+            const vTxt=item.selectedVariant?` <span class="bg-blue-100 text-blue-700 text-[10px] px-1.5 py-0.5 rounded-full font-bold">[${item.selectedVariant}]</span>`:'<span class="text-[10px] text-gray-400">[ভ্যারিয়েন্ট নেই]</span>';
+            return `<div class="flex items-center gap-3 p-2.5 bg-gray-50 rounded-lg mb-2 border border-gray-200">
+                <img src="${item.image||'https://via.placeholder.com/40'}" class="w-10 h-10 rounded-lg object-cover border" onerror="this.src='https://via.placeholder.com/40'">
+                <div class="min-w-0 flex-1">
+                    <p class="text-xs font-bold text-gray-800 truncate">${item.name} ${vTxt}</p>
+                    <p class="text-[10px] text-gray-400">Qty: ${item.quantity||item.qty} | ৳${item.price}</p>
+                </div>
+            </div>`;
+        }).join('');
+
+        Swal.fire({
+            title:'📦 এক্সচেঞ্জ (কাস্টমার)',
+            html:`
+                <p class="text-sm text-gray-500 mb-3">কাস্টমার সাইজ/ভ্যারিয়েন্ট পরিবর্তন চান।<br>ডেলিভারি চার্জ কাস্টমার দেবে।</p>
+                <div class="text-left max-h-[220px] overflow-y-auto mb-3">${itemsList}</div>
+                <div class="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-3">
+                    <p class="text-xs font-bold text-blue-700 mb-2">📋 ম্যানুয়াল কাজ:</p>
+                    <ol class="text-[11px] text-blue-600 space-y-1.5 list-decimal ml-4">
+                        <li>Products ট্যাবে যান</li>
+                        <li><b>পুরনো ভ্যারিয়েন্ট</b> স্টক <span class="font-bold text-green-700">+১</span></li>
+                        <li><b>নতুন ভ্যারিয়েন্ট</b> স্টক <span class="font-bold text-red-600">-১</span></li>
+                        <li>কাস্টমার থেকে ডেলিভারি চার্জ নিন</li>
+                    </ol>
+                </div>
+                <div class="bg-cyan-50 border border-cyan-200 rounded-lg p-3">
+                    <p class="text-[11px] text-cyan-700 text-center font-bold">স্ট্যাটাস "Exchange Customer" সেভ হবে<br>পরে আবার Shipped → Delivered দিন</p>
+                </div>`,
+            confirmButtonText:'কনফার্ম',
+            confirmButtonColor:'#0891b2',
+            showCancelButton:true,
+            cancelButtonText:'বাতিল'
+        }).then(r=>{
+            if(r.isConfirmed){
+                Swal.fire({title:'প্রসেসিং...',allowOutsideClick:false,didOpen:()=>Swal.showLoading()});
+                google.script.run.withSuccessHandler(res=>{
+                    if(res.success){
+                        const o=localData.orders.find(x=>x[1]===id);
+                        if(o)o[10]='Exchange Customer';
+                        renderOrders(document.getElementById('contentArea'));
+                        Swal.fire({title:'স্ট্যাটাস আপডেট হয়েছে!',text:'ইউজার "Exchange Customer" দেখবে',icon:'success',timer:1500,showConfirmButton:false});
+                    }else Swal.fire('Error',res.error,'error');
+                }).withFailureHandler(e=>Swal.fire('Error',e.toString(),'error')).adminUpdateOrderStatus(adminSecret,id,'Exchange Customer');
+            }
+        });
+        return;
+    }
+
+    // ==========================================
+    // ৩. এক্সচেঞ্জ (সেলার) — স্ট্যাটাস + ExtraCost
+    // ==========================================
+    if(st==='Exchange Seller'){
+        const order=localData.orders.find(x=>x[1]===id);
+        const existingCost=parseFloat(order[19])||0;
+        let items=[];try{items=JSON.parse(order[7]||"[]");}catch(e){}
+
+        let damageRef=items.map(item=>{
+            const prod=localData.products.find(p=>String(p.id)===String(item.id));
+            let cost=0;
+            if(prod) cost=parseProductCost(prod.costprice,item.selectedVariant)||parseFloat(prod.costprice)||0;
+            const qty=parseInt(item.quantity||item.qty)||1;
+            if(cost>0) return `<div class="flex justify-between text-[11px] py-1 border-b border-red-100"><span class="text-red-700">${item.name}${item.selectedVariant?' ['+item.selectedVariant+']':''} × ${qty}</span><span class="font-bold text-red-800">ক্রয়: ৳${(cost*qty).toLocaleString()}</span></div>`;
+            return '';
+        }).filter(Boolean).join('');
+
+        Swal.fire({
+            title:'🔄 এক্সচেঞ্জ (সেলার)',
+            html:`
+                <p class="text-sm text-gray-500 mb-3">ভুল পণ্য পাঠানো হয়েছে। নতুন পণ্য পাঠাতে হবে।</p>
+                ${damageRef?`<div class="bg-red-50 border border-red-200 rounded-lg p-3 mb-3">
+                    <p class="text-[10px] font-bold text-red-700 mb-1.5">🔴 ড্যামেজ পণ্য (রিস্টক হবে না, শুধু রেফারেন্স):</p>
+                    ${damageRef}
+                </div>`:''}
+                <div class="flex items-center justify-center gap-2 sm:gap-4 bg-orange-50 rounded-xl p-4 border-2 border-dashed border-orange-300 flex-wrap">
+                    <div class="text-center min-w-[80px]">
+                        <p class="text-[10px] text-gray-400 mb-1">আগের এক্সট্রা</p>
+                        <p class="text-xl font-black text-gray-600">৳${existingCost}</p>
+                    </div>
+                    <span class="text-2xl font-black text-gray-300">+</span>
+                    <div class="text-center">
+                        <p class="text-[10px] text-orange-500 mb-1 font-bold">নতুন কুরিয়ার</p>
+                        <input type="number" id="exSellerCourier" value="0" min="0" step="1"
+                            oninput="document.getElementById('exSellerTotal').textContent='৳'+(${existingCost}+parseFloat(this.value||0))"
+                            class="w-24 text-center text-xl font-black border-2 border-orange-300 rounded-lg p-2 focus:ring-2 focus:ring-orange-400 outline-none">
+                    </div>
+                    <span class="text-2xl font-black text-gray-300">=</span>
+                    <div class="text-center min-w-[80px]">
+                        <p class="text-[10px] text-orange-600 mb-1 font-bold">মোট লস সেভ</p>
+                        <p id="exSellerTotal" class="text-xl font-black text-orange-600">৳${existingCost}</p>
+                    </div>
+                </div>
+                <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-3 mt-3 mb-3">
+                    <p class="text-[10px] font-bold text-yellow-700 mb-1.5">⚠️ ম্যানুয়াল কাজ:</p>
+                    <ul class="text-[11px] text-yellow-600 space-y-1 list-disc ml-4">
+                        <li>নতুন পণ্যের স্টক Products ট্যাব থেকে কমান</li>
+                        <li>ড্যামেজ পণ্য <b>রিস্টক করবেন না</b></li>
+                    </ul>
+                </div>
+                <div class="bg-pink-50 border border-pink-200 rounded-lg p-3">
+                    <p class="text-[11px] text-pink-700 text-center font-bold">স্ট্যাটাস "Exchange Seller" সেভ হবে<br>পরে আবার Shipped → Delivered দিন</p>
+                </div>`,
+            showCancelButton:true,
+            confirmButtonText:'এক্সচেঞ্জ কনফার্ম',
+            confirmButtonColor:'#d33',
+            cancelButtonText:'বাতিল',
+            focusConfirm:false,
+            preConfirm:()=>{
+                const courier=parseFloat(document.getElementById('exSellerCourier').value)||0;
+                if(courier<=0){Swal.showValidationMessage('নতুন কুরিয়ার চার্জ লিখুন');return false;}
+                return {courier,total:existingCost+courier};
+            }
+        }).then(r=>{
+            if(r.isConfirmed){
+                const totalCost=r.value.total;
+                Swal.fire({title:'প্রসেসিং...',allowOutsideClick:false,didOpen:()=>Swal.showLoading()});
+                // Step 1: স্ট্যাটাস পরিবর্তন
+                google.script.run.withSuccessHandler(res=>{
+                    if(res.success){
+                        // Step 2: ExtraCost সেভ
+                        google.script.run.withSuccessHandler(res2=>{
+                            if(res2.success){
+                                const o=localData.orders.find(x=>x[1]===id);
+                                if(o){o[10]='Exchange Seller';o[19]=totalCost;}
+                                renderOrders(document.getElementById('contentArea'));
+                                Swal.fire({title:'এক্সচেঞ্জ রেকর্ড হয়েছে!',html:`নতুন কুরিয়ার: ৳${r.value.courier}<br>মোট লস: ৳${totalCost}<br><span class="text-[10px] text-gray-400">ইউজার "Exchange Seller" দেখবে</span>`,icon:'success',timer:2500,showConfirmButton:false});
+                            }else Swal.fire('Error',res2.error,'error');
+                        }).withFailureHandler(e=>Swal.fire('Error',e.toString(),'error')).adminUpdateOrderExtraCost(adminSecret,id,totalCost);
+                    }else Swal.fire('Error',res.error,'error');
+                }).withFailureHandler(e=>Swal.fire('Error',e.toString(),'error')).adminUpdateOrderStatus(adminSecret,id,'Exchange Seller');
+            }
+        });
+        return;
+    }
+
+    // ==========================================
+    // ৪. সাধারণ স্ট্যাটাস
+    // ==========================================
     Swal.fire({title:`${st}?`,icon:'question',showCancelButton:true}).then(r=>{
         if(r.isConfirmed){
             Swal.fire({title:'Updating...',didOpen:()=>Swal.showLoading()});
