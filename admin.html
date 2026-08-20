@@ -1005,12 +1005,20 @@ function updateOrderStatus(id,st){
     // ==========================================
     Swal.fire({title:`${st}?`,icon:'question',showCancelButton:true}).then(r=>{
         if(r.isConfirmed){
-            Swal.fire({title:'Updating...',didOpen:()=>Swal.showLoading()});
+            Swal.fire({title:'Updating...',allowOutsideClick:false,didOpen:()=>Swal.showLoading()});
             google.script.run.withSuccessHandler(res=>{
                 if(res.success){
                     const o=localData.orders.find(x=>x[1]===id);
                     if(o)o[10]=st;
                     renderOrders(document.getElementById('contentArea'));
+                    // লোডার বন্ধ হয়ে সাকসেস মেসেজ ১.৫ সেকেন্ড দেখাবে
+                    Swal.fire({
+                        title: 'সফল হয়েছে!', 
+                        text: `স্ট্যাটাস "${st}" এ আপডেট হয়েছে`, 
+                        icon: 'success', 
+                        timer: 1500, 
+                        showConfirmButton: false
+                    });
                 }else Swal.fire('Error',res.error,'error');
             }).withFailureHandler(e=>Swal.fire('Error',e.toString(),'error')).adminUpdateOrderStatus(adminSecret,id,st);
         }
